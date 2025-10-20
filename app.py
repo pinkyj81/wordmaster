@@ -7,7 +7,7 @@ from sqlalchemy import text
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = (
-    'mssql+pyodbc://pinkyj81:zoskek38!!@ms1901.gabiadb.com/yujincast?driver=ODBC+Driver+17+for+SQL+Server'
+    'mssql+pyodbc://pinkyj81:zoskek38!!@ms1901.gabiadb.com/yujincast?driver=ODBC+Driver+18+for+SQL+Server'
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -154,3 +154,4 @@ def learning_log():
 # ✅ 서버 실행
 if __name__ == '__main__':
     app.run(debug=True)
+
