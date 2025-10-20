@@ -1,3 +1,8 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "apt-get update && apt-get install -y unixodbc-dev && pip install -r requirements.txt"
+buildCommand = """
+apt-get update &&
+apt-get install -y unixodbc unixodbc-dev &&
+apt-get install -y msodbcsql17 &&
+pip install -r requirements.txt
+"""
