@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="text-2xl font-semibold mb-6 text-gray-800 text-center">암기카드</h2>
+
+<!-- ✅ 암기카드 팝업 -->
+<div id="flashcardModal"
+     class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
+  
+  <!-- 카드 -->
+  <div id="flashcard"
+       class="text-white rounded-3xl shadow-2xl w-[90%] max-w-3xl h-[60vh]
+              flex flex-col justify-center items-center transition-all duration-500 cursor-pointer select-none relative bg-gradient-to-br from-indigo-500 to-purple-500"
+       onclick="flipCard()">
+
+    <!-- 진행도 -->
+    <div class="absolute top-4 right-6 text-sm opacity-80">
+      <span id="progressCount">1 / 1</span>
+    </div>
+
+    <!-- 앞면 -->
+    <div id="front" class="text-center transition-all duration-300 ease-in-out">
+      <p id="word" class="text-5xl font-bold tracking-tight"></p>
+      <p class="mt-8 text-sm opacity-70">(클릭하여 뜻 보기)</p>
+    </div>
+
+    <!-- ✅ 뒷면 (첨부색상 적용) -->
+    <div id="back"
+         class="hidden text-center transition-all duration-300 ease-in-out 
+                bg-gradient-to-br from-[#5C6BF6] to-[#7D84FF]
+                w-full h-full rounded-3xl flex flex-col justify-center items-center">
+      <p id="wordBack" class="text-5xl font-bold tracking-tight mb-4 text-white"></p>
+      <p id="meaning" class="text-2xl font-medium text-white/90"></p>
+      <p class="mt-8 text-sm opacity-80">(클릭하여 다음 단어로)</p>
+    </div>
+  </div>
+
+  <!-- 하단 버튼 -->
+  <div class="absolute bottom-10 w-full flex justify-center space-x-4">
+    <button onclick="prevCard()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">◀ 이전</button>
+    <button onclick="nextCard()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">다음 ▶</button>
+    <button onclick="closeFlashcardModal()" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">닫기</button>
+  </div>
+</div>
+
+<script>
+let currentIndex = 0;
+let isFront = true;
+const cards = {{ words | tojson }};
+
+function openFlashcardModal() {
+  document.getElementById("flashcardModal").classList.remove("hidden");
+  currentIndex = 0;
+  isFront = true;
+  showCard();
+}
+
+function closeFlashcardModal() {
+  // 모달 닫기 + 텍스트 목록으로 이동
+  window.location.href = "/";
+}
+
+
+function flipCard() {
+  const front = document.getElementById("front");
+  const back = document.getElementById("back");
+  const flashcard = document.getElementById("flashcard");
+
+  if (isFront) {
+    // 앞면 → 뒷면
+    front.classList.add("hidden");
+    back.classList.remove("hidden");
+    flashcard.classList.remove("from-indigo-500", "to-purple-500");
+    flashcard.classList.add("from-[#5C6BF6]", "to-[#7D84FF]");
+    isFront = false;
+  } else {
+    // 뒷면 → 다음 카드로
+    nextCard();
+  }
+}
+
+function showCard() {
+  const card = cards[currentIndex];
+  document.getElementById("word").innerText = card.word;
+  document.getElementById("wordBack").innerText = card.word;
+  document.getElementById("meaning").innerText = card.meaning;
+  document.getElementById("progressCount").innerText = `${currentIndex + 1} / ${cards.length}`;
+
+  // 초기화 (앞면으로)
+  const front = document.getElementById("front");
+  const back = document.getElementById("back");
+  const flashcard = document.getElementById("flashcard");
+  front.classList.remove("hidden");
+  back.classList.add("hidden");
+  flashcard.classList.remove("from-[#5C6BF6]", "to-[#7D84FF]");
+  flashcard.classList.add("from-indigo-500", "to-purple-500");
+  isFront = true;
+}
+
+function nextCard() {
+  if (currentIndex < cards.length - 1) {
+    currentIndex++;
+    showCard();
+  } else {
+    alert("모든 카드를 다 봤습니다!");
+    // ✅ 카드 학습 완료 시 텍스트 목록으로 자동 이동
+    window.location.href = "/";
+  }
+}
+
+
+function prevCard() {
+  if (currentIndex > 0) {
+    currentIndex--;
+  }
+  showCard();
+}
+
+window.addEventListener('load', openFlashcardModal);
+</script>
+
+{% endblock %}

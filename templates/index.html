@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="text-2xl font-semibold mb-6 text-gray-800">텍스트 기록</h2>
+
+<!-- 상단 필터/검색 -->
+<div class="flex flex-wrap items-center justify-between mb-6 space-y-2 sm:space-y-0">
+  <div class="flex items-center space-x-2">
+    <select class="border rounded-md px-2 py-1 text-sm">
+      <option>모든 출처</option>
+    </select>
+    <select class="border rounded-md px-2 py-1 text-sm">
+      <option>제목순</option>
+      <option>최근순</option>
+    </select>
+  </div>
+
+  <input type="text" placeholder="제목, 내용, 출처 검색..."
+         class="border px-3 py-1 rounded-md w-64 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+</div>
+
+<!-- 텍스트 목록 -->
+<div class="space-y-3">
+  {% for text in texts %}
+  <div class="flex justify-between items-center p-4 bg-white rounded-lg shadow-sm border hover:shadow-md transition">
+    <!-- 제목 및 정보 -->
+    <div>
+      <p class="font-medium text-gray-800">{{ text.title }}</p>
+      <p class="text-sm text-gray-500">저장된 단어: {{ text.word_count }}개 · 학습 완료: 0개</p>
+    </div>
+
+    <!-- 버튼 영역 -->
+    <div class="flex items-center space-x-2">
+      <button class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
+              onclick="openTextModal('{{ text.title }}', `{{ text.content|e }}`)">
+        읽기
+      </button>
+
+      <a href="/flashcards/{{ text.id }}" 
+         class="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1 rounded">암기카드</a>
+
+      <a href="/test/{{ text.id }}"
+   class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded">TEST</a>
+
+      <button onclick="deleteText('{{ text.id }}')"
+              class="bg-red-100 hover:bg-red-200 text-red-600 rounded px-2 py-1">
+        🗑
+      </button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- ✅ 텍스트 읽기 팝업 -->
+<div id="textModal"
+     class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl w-[90%] max-w-4xl p-10 max-h-[80vh] overflow-y-auto
+              border border-gray-200">
+    <!-- 제목 -->
+    <h3 id="modalTitle"
+        class="text-center text-2xl font-medium mb-8 text-gray-800 tracking-tight font-['Noto_Serif']"></h3>
+
+    <!-- 본문 -->
+    <div id="modalContent"
+         class="text-[17px] text-gray-700 leading-[1.9] tracking-[0.01em] font-['Noto_Serif']
+                text-justify whitespace-pre-line">
+    </div>
+
+    <!-- 닫기 버튼 -->
+    <div class="text-center mt-10">
+      <button onclick="closeTextModal()"
+              class="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition">
+        닫기
+      </button>
+    </div>
+  </div>
+</div>
+
+
+<!-- JS -->
+<script>
+function openTextModal(title, content) {
+  const modal = document.getElementById('textModal');
+  const modalTitle = document.getElementById('modalTitle');
+  const modalContent = document.getElementById('modalContent');
+
+  modalTitle.innerText = title;
+
+  // ✅ 문단 단위 줄바꿈 처리
+  const paragraphs = content.split('\n').filter(p => p.trim() !== '');
+  modalContent.innerHTML = paragraphs.map(p => `<p class="mb-6 indent-4">${p.trim()}</p>`).join('');
+
+  modal.classList.remove('hidden');
+}
+
+function closeTextModal() {
+  document.getElementById('textModal').classList.add('hidden');
+}
+</script>
+
+
+{% endblock %}

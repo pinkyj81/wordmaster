@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="text-2xl font-medium mb-6 text-gray-700 text-center tracking-tight">{{ text.title }}</h2>
+
+<div id="textArea"
+     class="max-w-4xl mx-auto bg-white p-8 rounded-2xl shadow-sm
+            leading-[1.9] text-[17px] text-gray-700 tracking-[0.01em]
+            font-['Noto_Serif'] text-justify">
+
+  {% set paragraphs = text.content.split('\n') %}
+  {% for paragraph in paragraphs %}
+    <p class="mb-6 indent-4">
+      {% for word in paragraph.split() %}
+        <span class="word inline cursor-pointer hover:text-blue-600 font-normal">{{ word }}</span>&nbsp;
+      {% endfor %}
+    </p>
+  {% endfor %}
+</div>
+
+<div id="popup"
+     class="hidden fixed bottom-10 right-10 bg-white border p-4 shadow-lg rounded-xl w-72 z-50">
+  <h3 class="font-semibold text-lg mb-1 text-gray-800" id="popupWord"></h3>
+  <p id="popupMeaning" class="mb-3 text-gray-700 text-sm leading-snug"></p>
+  <div class="flex justify-end space-x-2">
+    <button id="addBtn"
+            class="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded transition">
+      단어장에 추가
+    </button>
+    <button onclick="closePopup()"
+            class="text-gray-500 hover:text-gray-700 px-3 py-1 transition">
+      닫기
+    </button>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script>
+const textId = "{{ text.id }}";
+const textTitle = "{{ text.title }}";
+
+// 강제 inline 보장
+document.querySelectorAll('.word').forEach(span => {
+  span.style.display = 'inline';
+  span.style.whiteSpace = 'normal';
+  span.style.fontWeight = '400';
+});
+
+// 번호 앞 문단 여백
+document.querySelectorAll('p').forEach(p => {
+  if (p.innerText.trim().match(/^\d+\./)) {
+    p.style.marginTop = '1.5em';
+    p.style.fontWeight = '500';
+  }
+});
+</script>
+{% endblock %}

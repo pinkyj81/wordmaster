@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="p-8">
+  <h2 class="text-2xl font-bold mb-6 text-gray-800">학습 기록 대시보드</h2>
+
+  <!-- ✅ 테스트 횟수 요약 그래프 -->
+  <div class="bg-white p-6 rounded-xl shadow mb-8">
+    <h3 class="text-lg font-semibold mb-4 text-gray-700">텍스트별 테스트 횟수</h3>
+    <canvas id="testCountChart" height="120"></canvas>
+  </div>
+
+  <!-- ✅ 학습 기록 테이블 -->
+  <div class="bg-white p-6 rounded-xl shadow">
+    <h3 class="text-lg font-semibold mb-4 text-gray-700">상세 기록</h3>
+    {% if logs %}
+      <table class="w-full border-collapse">
+        <thead>
+          <tr class="bg-blue-100 text-gray-800 text-left">
+            <th class="p-3 border">날짜</th>
+            <th class="p-3 border">테스트 이름</th>
+            <th class="p-3 border text-center">문항 수</th>
+            <th class="p-3 border text-center">정답 수</th>
+            <th class="p-3 border text-center">점수</th>
+            <th class="p-3 border text-center">소요 시간</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in logs %}
+          <tr class="hover:bg-gray-50 text-gray-700">
+            <td class="p-3 border">{{ log.completed_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td class="p-3 border">{{ log.test_name }}</td>
+            <td class="p-3 border text-center">{{ log.total_questions }}</td>
+            <td class="p-3 border text-center">{{ log.correct_answers }}</td>
+
+            <!-- ✅ 점수 정수 + % 표시 -->
+            <td class="p-3 border text-blue-600 font-semibold text-center">
+              {{ "%.0f"|format(log.score) }}%
+            </td>
+
+            <td class="p-3 border text-center">{{ log.duration }}초</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="text-gray-500">아직 테스트 기록이 없습니다.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ✅ Chart.js 로 그래프 표시 -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const summaryData = {{ summary | tojson }};
+const ctx = document.getElementById('testCountChart').getContext('2d');
+
+const labels = summaryData.map(s => s.test_name);
+const counts = summaryData.map(s => s.test_count);
+
+new Chart(ctx, {
+  type: 'bar',
+  data: {
+    labels: labels,
+    datasets: [{
+      label: '테스트 횟수',
+      data: counts,
+      backgroundColor: 'rgba(59, 130, 246, 0.6)', // 파란색 투명도
+      borderColor: 'rgba(59, 130, 246, 1)',
+      borderWidth: 1,
+      borderRadius: 5,
+    }]
+  },
+  options: {
+    responsive: true,
+    scales: {
+      y: {
+        beginAtZero: true,
+        ticks: { stepSize: 1 }
+      }
+    },
+    plugins: {
+      legend: { display: false },
+      tooltip: { backgroundColor: '#2563EB', titleColor: '#fff', bodyColor: '#fff' }
+    }
+  }
+});
+</script>
+{% endblock %}

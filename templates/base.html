@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;500&display=swap" rel="stylesheet">
+  <meta charset="UTF-8">
+  <title>Word Master</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+  <!-- 🔹 상단 네비게이션 -->
+  <nav class="bg-blue-600 text-white p-4 flex items-center justify-between shadow">
+    <div class="flex items-center space-x-3">
+      <span class="text-2xl">📘</span>
+      <a href="/" class="font-bold text-lg hover:text-blue-200">Word Master</a>
+    </div>
+
+    <div class="flex space-x-6 text-sm">
+      <a href="/" class="hover:underline">텍스트 목록</a>
+      <a href="/word_list" class="hover:underline">단어 목록</a>
+      <a href="/learning_log" class="hover:underline">학습 기록</a>
+      <a href="/upload" class="hover:underline">텍스트 업로드</a>
+    </div>
+  </nav>
+
+  <!-- 🔹 페이지 본문 -->
+  <div class="p-6">
+    {% block content %}{% endblock %}
+  </div>
+
+</body>
+</html>
+
