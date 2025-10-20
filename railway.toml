@@ -7,9 +7,10 @@ mkdir -p /etc/apt/keyrings && \
 curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /etc/apt/keyrings/microsoft.gpg && \
 echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/24.04/prod noble main' > /etc/apt/sources.list.d/mssql-release.list && \
 apt-get update && ACCEPT_EULA=Y apt-get install -y msodbcsql18 && \
+if [ ! -f /usr/lib/x86_64-linux-gnu/libodbc.so.2 ]; then ln -s /usr/lib/x86_64-linux-gnu/libodbc.so /usr/lib/x86_64-linux-gnu/libodbc.so.2; fi && \
 pip install -r requirements.txt
 """
 
 [start]
-# LD_LIBRARY_PATH 설정 추가
+# 실행 시점에 환경 변수로 libodbc 경로 등록
 startCommand = "export LD_LIBRARY_PATH=/opt/microsoft/msodbcsql18/lib64:$LD_LIBRARY_PATH && gunicorn app:app"
