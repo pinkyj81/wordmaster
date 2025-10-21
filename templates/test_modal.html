@@ -7,6 +7,7 @@
       <button onclick="closeTestModal()" class="text-gray-500 hover:text-gray-700">✕</button>
     </div>
 
+    <!-- ✅ 진행바 -->
     <div class="mb-4">
       <div class="h-2 bg-gray-200 rounded">
         <div id="progressBar" class="h-2 bg-indigo-500 rounded" style="width:0%"></div>
@@ -16,22 +17,29 @@
       </p>
     </div>
 
+    <!-- ✅ 문제 영역 -->
     <div class="text-center mb-6">
       <p id="questionWord" class="text-3xl font-bold text-gray-800 mb-3"></p>
       <button id="soundBtn" class="text-indigo-500 hover:text-indigo-700 mb-2 text-sm">🔊 발음 듣기</button>
       <p id="sourceText" class="text-gray-500 text-sm"></p>
     </div>
 
+    <!-- ✅ 보기 영역 -->
     <div id="optionsContainer" class="space-y-2"></div>
   </div>
 </div>
 
 <script>
 let questions = {{ words | tojson }};
+
+// ✅ 문제 순서를 무작위로 섞기
+questions = shuffle(questions);
+
 let currentIndex = 0;
 let score = 0;
 let totalQuestions = questions.length;
 let startTime;
+let wrongWords = [];   // ✅ 틀린 단어 저장용 배열
 
 // ✅ 테스트 시작
 window.addEventListener('load', () => {
@@ -68,11 +76,12 @@ function renderOptions(options, correct) {
   });
 }
 
-// ✅ 정답 확인
+// ✅ 정답 확인 및 오답 저장
 function checkAnswer(isCorrect, btn, correct) {
   const buttons = document.querySelectorAll("#optionsContainer button");
   buttons.forEach(b => (b.disabled = true));
 
+  const q = questions[currentIndex];
   if (isCorrect) {
     btn.classList.add("bg-green-500", "text-white");
     score++;
@@ -80,6 +89,12 @@ function checkAnswer(isCorrect, btn, correct) {
     btn.classList.add("bg-red-500", "text-white");
     const correctBtn = Array.from(buttons).find(b => b.innerText.includes(correct));
     if (correctBtn) correctBtn.classList.add("bg-green-500", "text-white");
+
+    // ✅ 오답 단어 저장
+    wrongWords.push({
+      word: q.word,
+      meaning: q.meaning
+    });
   }
 
   setTimeout(() => {
@@ -99,7 +114,7 @@ function finishTest() {
   const testName = questions[0]?.text_title || "Unknown";
   const percent = Math.round((score / totalQuestions) * 100);
 
-  // ✅ Flask 서버로 결과 전송
+  // ✅ Flask 서버로 결과 전송 (오답 포함)
   fetch('/save_test_result', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -108,7 +123,8 @@ function finishTest() {
       total_questions: totalQuestions,
       correct_answers: score,
       score: percent,
-      duration: duration
+      duration: duration,
+      wrong_words: wrongWords   // ✅ 틀린 단어 리스트 전송
     })
   })
   .then(res => res.json())
@@ -131,6 +147,16 @@ function showResult(percent, duration) {
       <p class='text-3xl font-semibold text-indigo-600 mb-4'>🎉 테스트 완료!</p>
       <p class='text-lg text-gray-700 mb-3'>최종 점수: ${score} / ${totalQuestions} (${percent}%)</p>
       <p class='text-gray-600 mb-6'>소요 시간: ${duration}초</p>
+      ${
+        wrongWords.length > 0
+          ? `<div class='mb-6 text-left w-[80%] mx-auto'>
+              <p class='text-gray-800 font-semibold mb-2'>틀린 단어:</p>
+              <ul class='list-disc list-inside text-gray-700'>
+                ${wrongWords.map(w => `<li>${w.word} — ${w.meaning}</li>`).join('')}
+              </ul>
+            </div>`
+          : `<p class='text-green-600 font-semibold mb-6'>모든 문제를 맞췄습니다!</p>`
+      }
       <button onclick="window.location.href='/'"
               class='px-5 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg'>
         텍스트 목록으로 돌아가기
@@ -139,7 +165,7 @@ function showResult(percent, duration) {
   `;
 }
 
-// ✅ 발음 버튼
+// ✅ 발음 버튼 (미국식)
 document.getElementById("soundBtn").addEventListener("click", () => {
   const word = document.getElementById("questionWord").innerText;
   const utter = new SpeechSynthesisUtterance(word);
