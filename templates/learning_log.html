@@ -12,8 +12,9 @@
   <!-- ✅ 학습 기록 테이블 -->
   <div class="bg-white p-6 rounded-xl shadow">
     <h3 class="text-lg font-semibold mb-4 text-gray-700">상세 기록</h3>
+
     {% if logs %}
-      <table class="w-full border-collapse">
+      <table class="w-full border-collapse text-sm">
         <thead>
           <tr class="bg-blue-100 text-gray-800 text-left">
             <th class="p-3 border">날짜</th>
@@ -22,6 +23,7 @@
             <th class="p-3 border text-center">정답 수</th>
             <th class="p-3 border text-center">점수</th>
             <th class="p-3 border text-center">소요 시간</th>
+            <th class="p-3 border text-center">틀린 단어</th>
           </tr>
         </thead>
         <tbody>
@@ -38,6 +40,15 @@
             </td>
 
             <td class="p-3 border text-center">{{ log.duration }}초</td>
+
+            <!-- ✅ 틀린 단어 보기 버튼 -->
+            <td class="p-3 border text-center">
+              <button
+                onclick="showWrongWords({{ log.test_words | safe }})"
+                class="px-3 py-1 bg-indigo-500 text-white rounded hover:bg-indigo-600 text-xs">
+                보기
+              </button>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -48,7 +59,16 @@
   </div>
 </div>
 
-<!-- ✅ Chart.js 로 그래프 표시 -->
+<!-- ✅ 틀린 단어 모달 -->
+<div id="wrongWordModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+  <div class="bg-white rounded-xl p-6 w-[400px] shadow-lg max-h-[70vh] overflow-y-auto">
+    <h3 class="text-lg font-semibold text-gray-800 mb-3">틀린 단어 목록</h3>
+    <ul id="wrongWordList" class="space-y-1 text-gray-700 mb-4"></ul>
+    <button onclick="closeWrongWordModal()" class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">닫기</button>
+  </div>
+</div>
+
+<!-- ✅ Chart.js 그래프 -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 const summaryData = {{ summary | tojson }};
@@ -64,7 +84,7 @@ new Chart(ctx, {
     datasets: [{
       label: '테스트 횟수',
       data: counts,
-      backgroundColor: 'rgba(59, 130, 246, 0.6)', // 파란색 투명도
+      backgroundColor: 'rgba(59, 130, 246, 0.6)',
       borderColor: 'rgba(59, 130, 246, 1)',
       borderWidth: 1,
       borderRadius: 5,
@@ -84,5 +104,32 @@ new Chart(ctx, {
     }
   }
 });
+
+
+// ✅ 틀린 단어 모달 표시 함수
+function showWrongWords(data) {
+  const modal = document.getElementById("wrongWordModal");
+  const list = document.getElementById("wrongWordList");
+  list.innerHTML = "";
+
+  if (!data || data.length === 0) {
+    list.innerHTML = "<li class='text-gray-500'>모든 문제를 맞췄습니다!</li>";
+  } else {
+    data.forEach(w => {
+      const li = document.createElement("li");
+      li.textContent = `${w.word} — ${w.meaning}`;
+      list.appendChild(li);
+    });
+  }
+
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+}
+
+// ✅ 모달 닫기
+function closeWrongWordModal() {
+  const modal = document.getElementById("wrongWordModal");
+  modal.classList.add("hidden");
+}
 </script>
 {% endblock %}
