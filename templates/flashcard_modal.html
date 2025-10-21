@@ -24,13 +24,23 @@
       <p class="mt-8 text-sm opacity-70">(클릭하여 뜻 보기)</p>
     </div>
 
-    <!-- ✅ 뒷면 (첨부색상 적용) -->
+    <!-- ✅ 뒷면 -->
     <div id="back"
          class="hidden text-center transition-all duration-300 ease-in-out 
                 bg-gradient-to-br from-[#5C6BF6] to-[#7D84FF]
                 w-full h-full rounded-3xl flex flex-col justify-center items-center">
       <p id="wordBack" class="text-5xl font-bold tracking-tight mb-4 text-white"></p>
       <p id="meaning" class="text-2xl font-medium text-white/90"></p>
+
+      <!-- ✅ 발음 듣기 버튼 (이벤트 버블링 방지 포함) -->
+      <button
+        onclick="playSound(event, document.getElementById('wordBack').innerText)"
+        class="mt-6 bg-white text-indigo-600 px-4 py-2 rounded-full shadow hover:bg-indigo-100 flex items-center space-x-2">
+        <span>🔊</span>
+        <span>발음 듣기</span>
+      </button>
+      <audio id="audio"></audio>
+
       <p class="mt-8 text-sm opacity-80">(클릭하여 다음 단어로)</p>
     </div>
   </div>
@@ -44,6 +54,15 @@
 </div>
 
 <script>
+function playSound(event, word) {
+  // 카드 클릭 이벤트가 부모로 전달되지 않게 막기
+  event.stopPropagation();
+
+  const audio = document.getElementById('audio');
+  audio.src = `/tts/${encodeURIComponent(word)}?t=${Date.now()}`; // 캐시 방지
+  audio.play();
+}
+
 let currentIndex = 0;
 let isFront = true;
 const cards = {{ words | tojson }};
@@ -59,7 +78,6 @@ function closeFlashcardModal() {
   // 모달 닫기 + 텍스트 목록으로 이동
   window.location.href = "/";
 }
-
 
 function flipCard() {
   const front = document.getElementById("front");
@@ -103,11 +121,9 @@ function nextCard() {
     showCard();
   } else {
     alert("모든 카드를 다 봤습니다!");
-    // ✅ 카드 학습 완료 시 텍스트 목록으로 자동 이동
     window.location.href = "/";
   }
 }
-
 
 function prevCard() {
   if (currentIndex > 0) {
