@@ -1,5 +1,6 @@
 Flask
 Flask_SQLAlchemy
-gunicorn
 SQLAlchemy
 pyodbc
+gunicorn
+gTTS==2.5.4
