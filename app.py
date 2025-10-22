@@ -9,13 +9,14 @@ import json
 
 app = Flask(__name__)
 
-# ✅ SQL Server 연결
+
+# ✅ SSL + 인증서 신뢰 옵션 추가 (Render 완전호환)
 app.config['SQLALCHEMY_DATABASE_URI'] = (
-    'mssql+pyodbc://pinkyj81:zoskek38!!@ms1901.gabiadb.com/yujincast?driver=ODBC+Driver+18+for+SQL+Server'
+    f"mssql+pyodbc://pinkyj81:zoskek38!!@ms1901.gabiadb.com/yujincast"
+    "?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=yes"
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
-
 
 # ✅ WordsRow 모델
 class WordsRow(db.Model):
@@ -265,4 +266,3 @@ def upload_words():
 # ✅ 서버 실행
 if __name__ == '__main__':
     app.run(debug=True)
-
