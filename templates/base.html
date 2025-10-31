@@ -24,7 +24,7 @@
 
     <div class="flex space-x-6 text-sm font-medium">
       <a href="/" class="hover:underline">텍스트 목록</a>
-      <a href="/texts" class="hover:underline">텍스트 관리</a>
+      <a href="#" onclick="openWordManager()" class="hover:underline">단어 관리</a>
       <a href="/learning_log" class="hover:underline">학습 기록</a>
       <button onclick="openUploadModal()" class="hover:underline">텍스트 업로드</button>
     </div>
@@ -191,5 +191,8 @@
       .catch(() => alert('❌ 단어 업로드 중 오류 발생'));
     }
   </script>
+  <!-- ✅ Bootstrap JS (모달 동작용) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
 </body>
 </html>
