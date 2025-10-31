@@ -9,14 +9,14 @@ import json
 
 app = Flask(__name__)
 
-
-# ✅ SSL + 인증서 신뢰 옵션 추가 (Render 완전호환)
+# ✅ SQL Server 연결 (SSL 인증서 허용)
 app.config['SQLALCHEMY_DATABASE_URI'] = (
     f"mssql+pyodbc://pinkyj81:zoskek38!!@ms1901.gabiadb.com/yujincast"
     "?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=yes"
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+
 
 # ✅ WordsRow 모델
 class WordsRow(db.Model):
@@ -26,12 +26,12 @@ class WordsRow(db.Model):
     meaning = db.Column(db.String, nullable=False)
     pronunciation = db.Column(db.String)
     sentence = db.Column(db.String)
-    is_learned = db.Column(db.Boolean, nullable=False)
-    text_id = db.Column(db.String, nullable=False)
-    text_title = db.Column(db.String, nullable=False)
-    added_at = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime)
-    updated_at = db.Column(db.DateTime)
+    is_learned = db.Column(db.Boolean, nullable=True)
+    text_id = db.Column(db.String, nullable=True)
+    text_title = db.Column(db.String, nullable=True)
+    added_at = db.Column(db.String)
+    created_at = db.Column(db.String)
+    updated_at = db.Column(db.String)
     example = db.Column(db.String)
 
 
@@ -48,27 +48,51 @@ class TestRecord(db.Model):
     test_words = db.Column(db.String)
     created_at = db.Column(db.DateTime)
 
+@app.route('/text_records')
+def text_records():
+    # 기존 목록 쿼리
+    records = db.session.execute(text("SELECT * FROM text_records_rows ORDER BY id")).fetchall()
+
+    # ✅ 출처 목록 (중복 제거)
+    sources = db.session.execute(text("""
+        SELECT DISTINCT source FROM text_records_rows
+        WHERE source IS NOT NULL AND source <> ''
+    """)).fetchall()
+
+    # ✅ sources를 템플릿으로 전달
+    return render_template('text_records.html', 
+                           records=records, 
+                           sources=[row.source for row in sources])
 
 # ✅ 홈 화면 (텍스트 목록)
 @app.route('/')
 def index():
+    # ✅ 텍스트 목록 불러오기
     query = text("SELECT id, title, content, word_count, source FROM text_records_rows ORDER BY title ASC")
     texts = db.session.execute(query).fetchall()
-    return render_template('index.html', texts=texts)
+
+    # ✅ 출처 목록 (중복 제거)
+    sources = db.session.execute(text("""
+        SELECT DISTINCT source FROM text_records_rows
+        WHERE source IS NOT NULL AND source <> ''
+    """)).fetchall()
+
+    # ✅ sources 함께 전달
+    return render_template('index.html', 
+                           texts=texts, 
+                           sources=[row.source for row in sources])
+
 
 
 # ✅ 단어 테스트 페이지
 @app.route('/test/<text_id>')
 def word_test(text_id):
     words = WordsRow.query.filter_by(text_id=text_id).all()
-    word_list = [
-        {"word": w.word, "meaning": w.meaning, "text_title": w.text_title}
-        for w in words
-    ]
+    word_list = [{"word": w.word, "meaning": w.meaning, "text_title": w.text_title} for w in words]
     return render_template('test_modal.html', words=word_list)
 
 
-# ✅ 테스트 결과 저장 (틀린 단어 포함)
+# ✅ 테스트 결과 저장
 @app.route('/save_test_result', methods=['POST'])
 def save_test_result():
     data = request.get_json()
@@ -107,14 +131,11 @@ def save_test_result():
 @app.route('/flashcards/<text_id>')
 def flashcards(text_id):
     words = WordsRow.query.filter_by(text_id=text_id).all()
-    word_list = [
-        {"word": w.word, "meaning": w.meaning, "text_title": w.text_title}
-        for w in words
-    ]
+    word_list = [{"word": w.word, "meaning": w.meaning, "text_title": w.text_title} for w in words]
     return render_template('flashcard_modal.html', words=word_list)
 
 
-# ✅ 학습 로그 페이지 (틀린 단어 포함)
+# ✅ 학습 로그 페이지
 @app.route('/learning_log')
 def learning_log():
     query = text("""
@@ -206,18 +227,19 @@ def upload_text():
     title = data.get('title', '')
     source = data.get('source', '')
     content = data.get('content', '')
-    record_id = str(uuid.uuid4())
+    record_id = title.split(' ')[0][:4]
 
     query = text("""
-        INSERT INTO text_records_rows (id, title, content, source, word_count, created_at)
-        VALUES (:id, :title, :content, :source, 0, SYSDATETIMEOFFSET())
+        INSERT INTO text_records_rows (id, title, content, source, word_count, created_at, updated_at)
+        VALUES (:id, :title, :content, :source, 0, SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET())
     """)
     db.session.execute(query, {"id": record_id, "title": title, "content": content, "source": source})
     db.session.commit()
     return jsonify({"message": "텍스트 업로드 완료"})
 
 
-# ✅ 단어 업로드 (created_at / updated_at 포함)
+
+# ✅ 단어 업로드 (날짜 필드 → 문자열 저장으로 수정)
 @app.route('/upload_words', methods=['POST'])
 def upload_words():
     try:
@@ -228,40 +250,112 @@ def upload_words():
         if not text_id or not words:
             return jsonify({"error": "필수 데이터 누락"}), 400
 
-        # 텍스트 제목 가져오기
+        # 텍스트 제목
         title_query = text("SELECT title FROM text_records_rows WHERE id = :id")
         result = db.session.execute(title_query, {"id": text_id}).fetchone()
         text_title = result.title if result else "(제목 없음)"
 
-        print(f"📥 단어 업로드 요청: {len(words)}개 / text_id={text_id} / text_title={text_title}")
+        # ✅ 현재 가장 큰 id 값 가져오기
+        last_id_query = text("SELECT MAX(CAST(id AS INT)) AS max_id FROM words_rows")
+        result = db.session.execute(last_id_query).fetchone()
+        current_max_id = result.max_id or 0  # 없으면 0부터 시작
+
+        now = datetime.now().isoformat(timespec='seconds')
 
         for w in words:
-            word_id = str(uuid.uuid4())
+            current_max_id += 1  # +1 증가
             insert_query = text("""
                 INSERT INTO words_rows
                     (id, word, meaning, is_learned, text_id, text_title,
                      added_at, created_at, updated_at)
                 VALUES
                     (:id, :word, :meaning, 0, :text_id, :text_title,
-                     SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET())
+                     :now, :now, :now)
             """)
             db.session.execute(insert_query, {
-                "id": word_id,
+                "id": str(current_max_id),
                 "word": w["word"],
                 "meaning": w["meaning"],
                 "text_id": text_id,
-                "text_title": text_title
+                "text_title": text_title,
+                "now": now
             })
 
         db.session.commit()
-        print("✅ 단어 업로드 완료")
         return jsonify({"message": "단어 업로드 완료"})
 
     except Exception as e:
         db.session.rollback()
-        print(f"❌ 업로드 오류: {e}")
         return jsonify({"error": str(e)}), 500
 
+# ✅ 텍스트 제목 리스트 반환
+@app.route('/get_text_titles')
+def get_text_titles():
+    query = text("SELECT id, title FROM text_records_rows ORDER BY title ASC")
+    result = db.session.execute(query).fetchall()
+    return jsonify([{"id": r.id, "title": r.title} for r in result])
+
+
+# ✅ 특정 텍스트의 단어 목록 반환
+@app.route('/get_words_by_text/<text_id>')
+def get_words_by_text(text_id):
+    query = text("""
+        SELECT id, word, meaning 
+        FROM words_rows
+        WHERE text_id = :text_id
+        ORDER BY word ASC
+    """)
+    result = db.session.execute(query, {"text_id": text_id}).fetchall()
+    return jsonify([{"id": r.id, "word": r.word, "meaning": r.meaning} for r in result])
+
+
+# ✅ 단어 수정
+@app.route('/update_word', methods=['POST'])
+def update_word():
+    data = request.get_json()
+    word_id = data.get('id')
+    word = data.get('word')
+    meaning = data.get('meaning')
+
+    query = text("""
+        UPDATE words_rows
+        SET word = :word,
+            meaning = :meaning,
+            updated_at = SYSDATETIMEOFFSET()
+        WHERE id = :id
+    """)
+    db.session.execute(query, {"id": word_id, "word": word, "meaning": meaning})
+    db.session.commit()
+    return jsonify({"message": "단어가 수정되었습니다."})
+# ✅ 단어 삭제
+@app.route('/delete_word/<word_id>', methods=['DELETE'])
+def delete_word(word_id):
+    query = text("DELETE FROM words_rows WHERE id = :id")
+    db.session.execute(query, {"id": word_id})
+    db.session.commit()
+    return jsonify({"message": "단어가 삭제되었습니다."})
+
+@app.route('/get_sources')
+def get_sources():
+    query = text("""
+        SELECT DISTINCT source
+        FROM text_records_rows
+        WHERE source IS NOT NULL AND source <> ''
+        ORDER BY source
+    """)
+    result = db.session.execute(query).fetchall()
+    return jsonify([{"source": r[0]} for r in result])
+
+@app.route('/get_titles_by_source/<source>')
+def get_titles_by_source(source):
+    query = text("""
+        SELECT id, title
+        FROM text_records_rows
+        WHERE source = :source
+        ORDER BY title ASC
+    """)
+    result = db.session.execute(query, {"source": source}).fetchall()
+    return jsonify([{"id": r[0], "title": r[1]} for r in result])
 
 # ✅ 서버 실행
 if __name__ == '__main__':
