@@ -48,6 +48,43 @@ class TestRecord(db.Model):
     test_words = db.Column(db.String)
     created_at = db.Column(db.DateTime)
 
+@app.route('/')
+def index():
+    query = text("""
+        SELECT 
+            t.id, 
+            t.title, 
+            t.source,
+            ISNULL(w.word_count, 0) AS word_count,
+            ISNULL(tc.test_count, 0) AS test_count
+        FROM text_records_rows t
+        LEFT JOIN (
+            SELECT text_id, COUNT(*) AS word_count
+            FROM words_rows
+            GROUP BY text_id
+        ) w ON t.id = w.text_id
+        LEFT JOIN (
+            SELECT 
+                test_name, 
+                COUNT(*) AS test_count
+            FROM test_records_rows
+            GROUP BY test_name
+        ) tc ON t.title = tc.test_name
+        ORDER BY t.id ASC
+    """)
+    texts = db.session.execute(query).fetchall()
+
+    sources = db.session.execute(text("""
+        SELECT DISTINCT source 
+        FROM text_records_rows
+        WHERE source IS NOT NULL AND source <> ''
+    """)).fetchall()
+
+    return render_template('index.html',
+                           texts=texts,
+                           sources=[row.source for row in sources])
+
+
 @app.route('/text_records')
 def text_records():
     # 기존 목록 쿼리
@@ -64,12 +101,8 @@ def text_records():
                            records=records, 
                            sources=[row.source for row in sources])
 
-# ✅ 홈 화면 (텍스트 목록)
-@app.route('/')
-def index():
-    # ✅ 텍스트 목록 불러오기
-    query = text("SELECT id, title, content, word_count, source FROM text_records_rows ORDER BY title ASC")
-    texts = db.session.execute(query).fetchall()
+
+
 
     # ✅ 출처 목록 (중복 제거)
     sources = db.session.execute(text("""
