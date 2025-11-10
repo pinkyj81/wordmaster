@@ -32,12 +32,21 @@
 <!-- 텍스트 목록 -->
 <div class="space-y-3">
   {% for text in texts %}
-  <div class="flex justify-between items-center p-4 bg-white rounded-lg shadow-sm border hover:shadow-md transition">
+  <div
+    class="flex justify-between items-center p-4 rounded-lg border hover:shadow-md transition"
+    style="background-color: {% if text.test_count >= 5 %}#f3e8ff{% else %}#ffffff{% endif %};">
+    
     <div>
       <p class="font-medium text-gray-800">{{ text.title }}</p>
-      <p class="text-sm text-gray-500">저장된 단어: {{ text.word_count }}개 · 학습 완료: 0개</p>
-    <p class="text-sm text-gray-500">출처: {{ text.source }}</p>
+      <p class="text-sm text-gray-500">
+        저장된 단어: {{ text.word_count }}개 · 
+        학습 완료: <span class="{% if text.test_count >= 5 %}text-purple-700 font-semibold{% else %}text-gray-500{% endif %}">
+          {{ text.test_count }}개
+        </span>
+      </p>
+      <p class="text-sm text-gray-500">출처: {{ text.source }}</p>
     </div>
+
     <div class="flex items-center space-x-2">
       <button class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
         onclick="openTextModal('{{ text.id }}', '{{ text.title }}', `{{ text.content|e }}`)">읽기</button>
@@ -48,6 +57,7 @@
   </div>
   {% endfor %}
 </div>
+
 
 <!-- ✅ Tailwind 기반 업로드 모달 -->
 <div id="uploadModal"
