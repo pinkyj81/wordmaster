@@ -55,6 +55,7 @@ def index():
             t.id, 
             t.title, 
             t.source,
+            t.content,
             ISNULL(w.word_count, 0) AS word_count,
             ISNULL(tc.test_count, 0) AS test_count
         FROM text_records_rows t
@@ -393,3 +394,4 @@ def get_titles_by_source(source):
 # ✅ 서버 실행
 if __name__ == '__main__':
     app.run(debug=True)
+
