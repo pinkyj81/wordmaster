@@ -51,27 +51,27 @@ class TestRecord(db.Model):
 @app.route('/')
 def index():
     query = text("""
-        SELECT 
-            t.id, 
-            t.title, 
-            t.source,
-            t.content,
-            ISNULL(w.word_count, 0) AS word_count,
-            ISNULL(tc.test_count, 0) AS test_count
-        FROM text_records_rows t
-        LEFT JOIN (
-            SELECT text_id, COUNT(*) AS word_count
-            FROM words_rows
-            GROUP BY text_id
-        ) w ON t.id = w.text_id
-        LEFT JOIN (
-            SELECT 
-                test_name, 
-                COUNT(*) AS test_count
-            FROM test_records_rows
-            GROUP BY test_name
-        ) tc ON t.title = tc.test_name
-        ORDER BY t.id ASC
+        SELECT
+  t.id,
+  t.title,
+  t.source,
+  t.content,
+  ISNULL(w.word_count, 0) AS word_count,
+  ISNULL(tc.test_count, 0) AS test_count
+FROM text_records_rows t
+LEFT JOIN (
+  SELECT text_id, COUNT(*) AS word_count
+  FROM words_rows
+  GROUP BY text_id
+) w ON t.id = w.text_id
+LEFT JOIN (
+  SELECT
+    LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1) AS text_id,
+    COUNT(*) AS test_count
+  FROM test_records_rows
+  GROUP BY LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1)
+) tc ON t.id = tc.text_id
+ORDER BY t.id ASC;
     """)
     texts = db.session.execute(query).fetchall()
 
@@ -394,4 +394,3 @@ def get_titles_by_source(source):
 # ✅ 서버 실행
 if __name__ == '__main__':
     app.run(debug=True)
-
