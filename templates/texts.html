@@ -98,24 +98,53 @@ function saveTextEdit() {
 }
 
 // ✅ 단어 수정 모달 열기
+
 function openWordModal(textId) {
   fetch(`/get_words/${textId}`)
     .then(res => res.json())
     .then(data => {
+      const modal = document.getElementById('wordModal');
       const container = document.getElementById('wordEditList');
+
+      modal.dataset.textId = textId;
       container.innerHTML = "";
+
       data.forEach(w => {
+        const checked = (w.is_learned == 1) ? "checked" : "";
         container.innerHTML += `
-          <div class="flex items-center space-x-2">
-            <input value="${w.word}" data-id="${w.id}" class="border rounded p-1 w-1/3 word-input">
-            <input value="${w.meaning}" class="border rounded p-1 w-2/3 meaning-input">
-          </div>`;
+          <div class="flex items-center gap-2">
+            <input type="checkbox"
+       class="learned-check"
+       style="
+         appearance:auto;
+         -webkit-appearance:auto;
+         display:inline-block;
+         width:20px;
+         height:20px;
+         min-width:20px;
+         min-height:20px;
+         border:1px solid #999;
+       "
+       ${checked}
+       onchange="toggleLearned(${w.id}, this.checked)">
+
+            <input value="${w.word}"
+                   data-id="${w.id}"
+                   class="border rounded p-1 w-1/3 word-input">
+
+            <input value="${w.meaning || ''}"
+                   class="border rounded p-1 w-2/3 meaning-input">
+          </div>
+        `;
       });
-      document.getElementById('wordModal').dataset.textId = textId;
-      document.getElementById('wordModal').classList.remove('hidden');
-      document.getElementById('wordModal').classList.add('flex');
+
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
     });
+
+     
 }
+
 
 // ✅ 단어 수정 저장
 function saveWordEdits() {
@@ -139,9 +168,24 @@ function saveWordEdits() {
   .catch(err => alert('❌ 수정 중 오류 발생'));
 }
 
+
 // ✅ 단어 모달 닫기
 function closeWordModal() {
-  document.getElementById('wordModal').classList.add('hidden');
+  const modal = document.getElementById('wordModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+async function toggleLearned(wordId, checked){
+  const res = await fetch('/api/word/learned', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ word_id: wordId, is_learned: checked })
+  });
+
+  if(!res.ok){
+    alert('❌ 체크 저장 실패');
+  }
 }
 </script>
 {% endblock %}
