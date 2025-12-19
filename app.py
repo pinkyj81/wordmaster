@@ -52,26 +52,30 @@ class TestRecord(db.Model):
 def index():
     query = text("""
         SELECT
-  t.id,
-  t.title,
-  t.source,
-  t.content,
-  ISNULL(w.word_count, 0) AS word_count,
-  ISNULL(tc.test_count, 0) AS test_count
+    t.id,
+    t.title,
+    t.source,
+    t.content,
+    ISNULL(w.word_count, 0) AS word_count,
+    ISNULL(tc.test_count, 0) AS test_count
 FROM text_records_rows t
+
 LEFT JOIN (
-  SELECT text_id, COUNT(*) AS word_count
-  FROM words_rows
-  GROUP BY text_id
+    SELECT text_id, COUNT(*) AS word_count
+    FROM words_rows
+    GROUP BY text_id
 ) w ON t.id = w.text_id
+
 LEFT JOIN (
-  SELECT
-    LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1) AS text_id,
-    COUNT(*) AS test_count
-  FROM test_records_rows
-  GROUP BY LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1)
+    SELECT
+        LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1) AS text_id,
+        COUNT(*) AS test_count
+    FROM test_records_rows
+    GROUP BY LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1)
 ) tc ON t.id = tc.text_id
+
 ORDER BY t.id ASC;
+
     """)
     texts = db.session.execute(query).fetchall()
 
@@ -334,13 +338,13 @@ def get_text_titles():
 @app.route('/get_words_by_text/<text_id>')
 def get_words_by_text(text_id):
     query = text("""
-        SELECT id, word, meaning 
+        SELECT id, word, meaning , ISNULL(is_learned, 0) AS is_learned
         FROM words_rows
         WHERE text_id = :text_id
         ORDER BY word ASC
     """)
     result = db.session.execute(query, {"text_id": text_id}).fetchall()
-    return jsonify([{"id": r.id, "word": r.word, "meaning": r.meaning} for r in result])
+    return jsonify([{"id": r.id, "word": r.word, "meaning": r.meaning ,"is_learned": int(r.is_learned or 0)} for r in result])
 
 
 # ✅ 단어 수정
@@ -379,6 +383,46 @@ def get_sources():
     """)
     result = db.session.execute(query).fetchall()
     return jsonify([{"source": r[0]} for r in result])
+
+@app.route("/get_words/<text_id>", endpoint="get_words_api")
+def get_words(text_id):
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, word, meaning, ISNULL(is_learned, 0) AS is_learned
+            FROM words_rows
+            WHERE text_id = ?
+            ORDER BY word
+        """, (text_id,))
+        rows = cur.fetchall()
+
+    return jsonify([{
+        "id": r.id,
+        "word": r.word,
+        "meaning": r.meaning,
+        "is_learned": int(r.is_learned)  # tinyint → int로
+    } for r in rows])
+
+@app.route("/api/word/learned", methods=["POST"])
+def api_word_learned():
+    try:
+        data = request.get_json(force=True)
+        word_id = int(data["word_id"])
+        is_learned = 1 if data["is_learned"] else 0
+
+        db.session.execute(text("""
+            UPDATE words_rows
+            SET is_learned = :is_learned,
+                updated_at = SYSDATETIMEOFFSET()
+            WHERE id = :word_id
+        """), {"is_learned": is_learned, "word_id": word_id})
+
+        db.session.commit()
+        return jsonify({"ok": True})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route('/get_titles_by_source/<source>')
 def get_titles_by_source(source):
