@@ -715,18 +715,8 @@ function closeTextModal() {
 </div>
 
 <script>
-// Debug helper: visible debug panel + logger
+// Debug helper (console only)
 function debugLog(msg){
-  try{
-    const panel = document.getElementById('debugPanel');
-    if(panel){
-      const entry = document.createElement('div');
-      entry.style.padding = '4px 6px';
-      entry.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
-      entry.innerText = '[' + new Date().toLocaleTimeString() + '] ' + msg;
-      panel.prepend(entry);
-    }
-  }catch(e){/* ignore */}
   console.log(msg);
 }
 
@@ -923,11 +913,13 @@ function closeClientTestModal() {
 }
 </script>
 
-<!-- Debug panel (visible) -->
-<div id="debugPanel" style="position:fixed; left:10px; bottom:10px; background:rgba(0,0,0,0.8); color:#fff; padding:8px; border-radius:6px; max-width:320px; font-size:12px; opacity:0.95; z-index:9999; max-height:220px; overflow:auto;">Debug panel</div>
-
 <script>
-// Global error handlers to surface runtime issues in the debug panel
+// Debug helper (console only)
+function debugLog(msg){
+  console.log(msg);
+}
+
+// Global error handlers
 window.addEventListener('error', function(e){
   try { debugLog('[ERROR] ' + (e.message || e) + ' (' + (e.filename || '') + ':' + (e.lineno || '') + ')'); } catch(_){}
 });
