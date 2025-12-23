@@ -13,6 +13,21 @@
   <div class="bg-white p-6 rounded-xl shadow">
     <h3 class="text-lg font-semibold mb-4 text-gray-700">상세 기록</h3>
 
+    <!-- 검색 (텍스트 제목으로) -->
+    <form method="get" class="mb-4 flex items-center gap-2">
+      <input list="testNames" name="q" placeholder="텍스트 제목으로 검색..." value="{{ q }}" class="border rounded px-3 py-2 w-64" />
+      <datalist id="testNames">
+        {% for t in test_names %}
+          <option value="{{ t }}">
+        {% endfor %}
+      </datalist>
+      <button type="submit" class="px-3 py-2 bg-indigo-600 text-white rounded">검색</button>
+      {% if q %}
+        <a href="/learning_log" class="px-3 py-2 bg-gray-200 rounded">초기화</a>
+      {% endif %}
+      <p class="text-sm text-gray-500 ml-4">{{ logs|length }}건</p>
+    </form>
+
     {% if logs %}
       <table class="w-full border-collapse text-sm">
         <thead>

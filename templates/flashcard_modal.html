@@ -75,8 +75,13 @@ function openFlashcardModal() {
 }
 
 function closeFlashcardModal() {
-  // 모달 닫기 + 텍스트 목록으로 이동
-  window.location.href = "/";
+  // 모달 닫기 (페이지 전체 리로드 대신 숨기기 및 오디오 정리)
+  const modal = document.getElementById("flashcardModal");
+  if (modal) modal.classList.add("hidden");
+  const audio = document.getElementById('audio');
+  if (audio) { audio.pause(); audio.currentTime = 0; }
+  // Navigate back to text list immediately
+  window.location.href = '/';
 }
 
 function flipCard() {
@@ -121,7 +126,7 @@ function nextCard() {
     showCard();
   } else {
     alert("모든 카드를 다 봤습니다!");
-    window.location.href = "/";
+    closeFlashcardModal();
   }
 }
 

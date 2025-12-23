@@ -22,9 +22,9 @@
   <div class="flex items-center space-x-2">
     <input type="text" placeholder="제목, 내용, 출처 검색..."
            class="border px-3 py-1 rounded-md w-64 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
-    <button onclick="openUploadModal()"
-            class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition">
-      텍스트 / 단어 업로드
+    <button type="button" id="openUnknownTestBtn" onclick="openUnknownTestModal()"
+            class="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 transition">
+      모르는 단어 테스트
     </button>
   </div>
 </div>
@@ -32,19 +32,20 @@
 <!-- 텍스트 목록 -->
 <div class="space-y-3">
   {% for text in texts %}
-  <div
+  <div id="text-card-{{ text.id }}"
     class="flex justify-between items-center p-4 rounded-lg border hover:shadow-md transition"
+    data-source="{{ text.source }}"
     style="background-color: {% if text.test_count >= 5 %}#f3e8ff{% else %}#ffffff{% endif %};">
     
     <div>
       <p class="font-medium text-gray-800">{{ text.title }}</p>
       <p class="text-sm text-gray-500">
-        저장된 단어: {{ text.word_count }}개 · 
-        학습 완료: <span class="{% if text.test_count >= 5 %}text-purple-700 font-semibold{% else %}text-gray-500{% endif %}">
-          {{ text.test_count }}개
-        </span>
+        저장된 단어: <span id="word-count-{{ text.id }}">{{ text.word_count }}</span>개 · 
+        <span class="text-sm">아는 단어:</span>
+        <span id="learned-count-{{ text.id }}" class="font-semibold text-gray-700">{{ text.learned_count or 0 }}</span>
+        <span class="text-gray-500">/</span>
+        <span class="text-gray-600">{{ text.word_count }}</span>
       </p>
-      <p class="text-sm text-gray-500">출처: {{ text.source }}</p>
     </div>
 
     <div class="flex items-center space-x-2">
@@ -56,6 +57,39 @@
     </div>
   </div>
   {% endfor %}
+</div>
+
+
+<!-- ✅ 모르는 단어 테스트 모달 -->
+<div id="unknownTestModal" class="fixed inset-0 hidden items-center justify-center bg-black/60 z-50 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-xl w-[90%] max-w-3xl p-6">
+    <div class="flex justify-between items-center border-b pb-3 mb-4">
+      <h3 class="text-xl font-semibold text-gray-800">모르는 단어 테스트</h3>
+      <button onclick="closeUnknownTestModal()" class="text-gray-500 hover:text-gray-700 text-2xl leading-none">&times;</button>
+    </div>
+
+    <div class="mb-3">
+      <label class="block font-medium text-gray-700 mb-1">출처 선택</label>
+      <select id="unknownSource" class="w-full border rounded-md px-3 py-2" onchange="loadTitlesForSource()">
+        <option value="">출처를 선택하세요</option>
+        {% for src in sources %}
+          <option value="{{ src }}">{{ src }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="mb-3">
+      <label class="block font-medium text-gray-700 mb-1">텍스트 선택 (복수 선택 가능)</label>
+      <div id="titlesList" class="max-h-48 overflow-y-auto border rounded p-2">
+        <!-- 체크박스로 텍스트 목록이 동적으로 추가됩니다 -->
+      </div>
+    </div>
+
+    <div class="text-right">
+      <button type="button" onclick="closeUnknownTestModal()" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">취소</button>
+      <button type="button" onclick="startUnknownTest()" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">테스트 시작</button>
+    </div>
+  </div>
 </div>
 
 
@@ -175,17 +209,14 @@
     
     <h3 id="modalTitle" class="text-center text-2xl font-medium mb-8 text-gray-800 tracking-tight font-['Noto_Serif']"></h3>
 
-    <!-- ✅ 수정 버튼을 모달 안으로 이동 -->
-    <div class="flex justify-end mb-3">
+    <!-- ✅ 수정/닫기 버튼 (같은 줄에 배치) -->
+    <div class="flex justify-end mb-3 space-x-3">
+      <button onclick="closeTextModal()" class="px-4 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded">닫기</button>
       <button id="editToggleBtn" onclick="toggleEditMode()" 
               class="bg-yellow-400 hover:bg-yellow-500 text-white px-3 py-1 rounded">수정</button>
     </div>
 
     <div id="modalContent" class="text-[17px] text-gray-700 leading-[1.9] font-['Noto_Serif'] text-justify whitespace-pre-line"></div>
-
-    <div class="text-center mt-10">
-      <button onclick="closeTextModal()" class="px-6 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition">닫기</button>
-    </div>
   </div>
 </div>
 
@@ -199,6 +230,90 @@ function openUploadModal() {
 function closeUploadModal() {
   document.getElementById('uploadModal').classList.add('hidden');
   document.getElementById('uploadModal').classList.remove('flex');
+}
+
+
+/* ========== 모르는 단어 테스트 로직 ========== */
+function openUnknownTestModal() {
+  console.log('[DEBUG] openUnknownTestModal called');
+  debugLog('[DEBUG] openUnknownTestModal called');
+  const modal = document.getElementById('unknownTestModal');
+  if (!modal) { console.error('[DEBUG] unknownTestModal element not found'); debugLog('[ERROR] unknownTestModal element not found'); alert('모달 요소를 찾을 수 없습니다. 콘솔을 확인하세요.'); return; }
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  // Pre-load titles for the currently selected source (if any)
+  try { loadTitlesForSource(); } catch (err) { console.error('[DEBUG] loadTitlesForSource failed', err); debugLog('[ERROR] loadTitlesForSource failed: ' + err); }
+}
+function closeUnknownTestModal() {
+  const modal = document.getElementById('unknownTestModal');
+  if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+}
+
+async function loadTitlesForSource() {
+  console.log('[DEBUG] loadTitlesForSource called');
+  debugLog('[DEBUG] loadTitlesForSource called');
+  const src = document.getElementById('unknownSource').value;
+  const list = document.getElementById('titlesList');
+  if (!list) { console.error('[DEBUG] titlesList element not found'); debugLog('[ERROR] titlesList element not found'); return; }
+  list.innerHTML = '';
+  if (!src) return;
+
+  try {
+    const res = await fetch(`/get_titles_by_source/${encodeURIComponent(src)}`);
+    if (!res.ok) { console.error('[DEBUG] get_titles_by_source failed', res.status); debugLog('[ERROR] get_titles_by_source failed: ' + res.status); return; }
+    const titles = await res.json();
+    titles.forEach(t => {
+      const id = t.id;
+      const row = document.createElement('div');
+      row.className = 'flex items-center justify-between py-1 px-2';
+      row.innerHTML = `
+        <label class="flex items-center gap-2">
+          <input type="checkbox" class="title-checkbox" value="${id}">
+          <span class="text-sm">${t.title}</span>
+        </label>`;
+      list.appendChild(row);
+    });
+    debugLog('[DEBUG] titles loaded: ' + titles.length);
+  } catch (err) {
+    console.error('[DEBUG] loadTitlesForSource error', err);
+    debugLog('[ERROR] loadTitlesForSource error: ' + err);
+    alert('텍스트 목록을 불러오는 중 오류가 발생했습니다. 콘솔을 확인하세요.');
+  }
+}
+
+async function startUnknownTest() {
+  console.log('[DEBUG] startUnknownTest called');
+  debugLog('[DEBUG] startUnknownTest called');
+  const checked = [...document.querySelectorAll('.title-checkbox:checked')].map(cb => cb.value);
+  if (checked.length === 0) return alert('하나 이상의 텍스트를 선택하세요.');
+
+  try {
+    const btn = document.getElementById('openUnknownTestBtn');
+    if (btn) btn.disabled = true;
+
+    const res = await fetch('/api/unlearned_words', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text_ids: checked })
+    });
+
+    debugLog('[DEBUG] /api/unlearned_words status: ' + res.status);
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || '단어를 불러오지 못했습니다.'); return; }
+    debugLog('[DEBUG] /api/unlearned_words returned ' + (data.length || 0) + ' words');
+    if (!data.length) return alert('선택한 텍스트의 모르는 단어가 없습니다.');
+
+    // 시작: client-side 테스트 모달에 단어를 전달
+    startClientTest(data);
+    closeUnknownTestModal();
+  } catch (err) {
+    console.error('[DEBUG] startUnknownTest error', err);
+    debugLog('[ERROR] startUnknownTest error: ' + err);
+    alert('테스트를 시작하는 중 오류가 발생했습니다. 콘솔을 확인하세요.');
+  } finally {
+    const btn = document.getElementById('openUnknownTestBtn');
+    if (btn) btn.disabled = false;
+  }
 }
 
 /* 탭 전환 */
@@ -280,7 +395,7 @@ document.getElementById('uploadWordsForm').addEventListener('submit', async (e) 
   closeUploadModal();
   location.reload();
 });
-/* /* ✅ 출처 필터 동작 (공백/대소문자/줄바꿈 안전 버전) */
+/* ✅ 출처 필터 동작 (data-source 속성 기반) */
 const sourceFilter = document.getElementById("sourceFilter");
 if (sourceFilter) {
   sourceFilter.addEventListener("change", () => {
@@ -288,11 +403,8 @@ if (sourceFilter) {
     const cards = document.querySelectorAll(".space-y-3 > div.flex.justify-between.items-center");
 
     cards.forEach(card => {
-      // 카드 안에서 '출처:' 문구가 포함된 줄을 가져옴
-      const sourceLine = Array.from(card.querySelectorAll(".text-sm.text-gray-500"))
-                              .map(el => el.textContent)
-                              .find(t => t.includes("출처:")) || "";
-      const cardSource = sourceLine.replace("출처:", "").trim().toLowerCase();
+      // data-source 속성에서 출처 읽기
+      const cardSource = (card.dataset.source || "").trim().toLowerCase();
 
       // 필터링 조건
       if (!selected || cardSource === selected) {
@@ -405,7 +517,7 @@ async function loadWordsByText() {
   }
 
   list.innerHTML = data.map(w => `
-  <div class="flex items-center gap-2 mb-2 bg-white border rounded p-2">
+  <div class="flex items-center gap-2 mb-2 bg-white border rounded p-2 word-row">
 
     <!-- ✅ 체크박스(아는 단어) -->
     <input type="checkbox"
@@ -421,12 +533,13 @@ async function loadWordsByText() {
            class="border px-2 py-1 rounded w-1/2"
            id="meaning-${w.id}">
 
-    <div class="flex space-x-2 ml-auto">
-      <button class="bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded"
-              onclick="updateWord('${w.id}')">수정</button>
+    <div class="flex space-x-2 ml-auto actions">
+      <!-- Small icon buttons; visible on hover -->
+      <button class="bg-transparent hover:bg-gray-100 text-gray-700 px-2 py-1 rounded text-sm"
+              onclick="updateWord('${w.id}')" title="수정">✏️</button>
 
-      <button class="bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded"
-              onclick="deleteWord('${w.id}')">삭제</button>
+      <button class="bg-transparent hover:bg-gray-100 text-gray-700 px-2 py-1 rounded text-sm"
+              onclick="deleteWord('${w.id}')" title="삭제">🗑️</button>
     </div>
   </div>
 `).join('');
@@ -467,7 +580,7 @@ async function deleteWord(id) {
 
 
 /* 텍스트 보기 모달 */
-function openTextModal(id, title, content) {
+async function openTextModal(id, title, content) {
   const modal = document.getElementById('textModal');
   const modalTitle = document.getElementById('modalTitle');
   const modalContent = document.getElementById('modalContent');
@@ -475,14 +588,362 @@ function openTextModal(id, title, content) {
   modalTitle.setAttribute('data-id', id);  // ✅ id 저장
   modalTitle.innerText = title;
 
-  const paragraphs = content.split('\n').filter(p => p.trim() !== '');
-  modalContent.innerHTML = `<div style="white-space: pre-line; line-height:1.9;" class="text-[17px] text-gray-700 font-['Noto_Serif']">${content}</div>`;
+  // Escape helper for safe HTML
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  // Default: show raw content (escaped)
+  let escaped = escapeHtml(content);
+
+  // Try to fetch saved words and highlight them inline
+  try {
+    const res = await fetch(`/get_words_by_text/${encodeURIComponent(id)}`);
+    if (res.ok) {
+      const words = await res.json();
+      if (words && words.length > 0) {
+        // Sort by length desc to avoid partial replacements and keep word + learned flag
+        const wordsSorted = words.filter(w => w.word).sort((a,b) => (b.word.length || 0) - (a.word.length || 0));
+        // Replace occurrences with <mark> using different classes for learned/unknown
+        wordsSorted.forEach(wobj => {
+          try {
+            const rawWord = wobj.word;
+            const w = escapeHtml(rawWord);
+            const pattern = w.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+            const re = new RegExp('\\b' + pattern + '\\b', 'gi');
+            const cls = (wobj.is_learned == 1 || wobj.is_learned === true) ? 'bg-green-200 text-green-800 rounded px-0.5' : 'bg-yellow-200 rounded px-0.5';
+            escaped = escaped.replace(re, function(m){ return `<mark class="${cls}">${m}</mark>`; });
+          } catch (innerErr) {
+            debugLog('[ERROR] highlight word failed: ' + innerErr);
+          }
+        });
+      } else {
+        debugLog('[DEBUG] get_words_by_text returned no words');
+      }
+    } else {
+      debugLog('[ERROR] get_words_by_text failed: ' + res.status);
+    }
+  } catch (err) {
+    debugLog('[ERROR] fetch words error: ' + err);
+  }
+
+  modalContent.innerHTML = `<div style="white-space: pre-line; line-height:1.9;" class="text-[17px] text-gray-700 font-['Noto_Serif']">${escaped}</div>`;
+
+  // attach single-click handler to allow adding unknown words
+  if (!modalContent.dataset.wordClick) {
+    // Debounce clicks to avoid multiple requests
+    let _wordClickInProgress = false;
+    modalContent.addEventListener('click', async function(e){
+      if (_wordClickInProgress) return;
+      _wordClickInProgress = true;
+      try {
+        const word = getWordAtPoint(e.clientX, e.clientY);
+        if (!word || word.length < 2) { _wordClickInProgress = false; return; }
+        const textId = modalTitle.dataset.id;
+        if (!textId) { _wordClickInProgress = false; return; }
+
+        debugLog('[DEBUG] clicked word (toggle attempt): ' + word);
+
+        // Try to add first. If server reports it already exists (created=false), then remove it.
+        const addRes = await addWordFromText(textId, word);
+        if (addRes && addRes.ok) {
+          if (addRes.created === true) {
+            highlightWordInModal(word);
+            showTempBadge(e.clientX, e.clientY, '추가됨');
+          } else {
+            // already existed — attempt to remove to toggle
+            const remRes = await removeWordFromText(textId, word);
+            if (remRes && remRes.ok && remRes.deleted) {
+              unhighlightWordInModal(word);
+              showTempBadge(e.clientX, e.clientY, '삭제됨');
+            } else if (remRes && remRes.ok && !remRes.deleted) {
+              showTempBadge(e.clientX, e.clientY, '없음');
+            } else if (remRes && remRes.error) {
+              debugLog('[ERROR] removeWord error after add reported exists: ' + remRes.error);
+            }
+          }
+        } else if (addRes && addRes.error) {
+          debugLog('[ERROR] addWord error: ' + addRes.error);
+        }
+      } catch(err) { debugLog('[ERROR] word click handler (toggle): ' + err); }
+      _wordClickInProgress = false;
+    });
+    modalContent.dataset.wordClick = '1';
+  }
+
   modal.classList.remove('hidden');
 }
 
 function closeTextModal() {
   document.getElementById('textModal').classList.add('hidden');
 }
+
+
+
+</script>
+
+<!-- ✅ Client-side test modal (used by 모르는 단어 테스트) -->
+<div id="clientTestModal" class="fixed inset-0 hidden bg-gray-900 bg-opacity-50 flex items-center justify-center z-50">
+  <div class="bg-white rounded-xl shadow-lg w-[550px] p-6 relative">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-semibold text-gray-800">단어 테스트</h2>
+      <button onclick="closeClientTestModal()" class="text-gray-500 hover:text-gray-700">✕</button>
+    </div>
+
+    <div class="mb-4">
+      <div class="h-2 bg-gray-200 rounded">
+        <div id="clientProgressBar" class="h-2 bg-indigo-500 rounded" style="width:0%"></div>
+      </div>
+      <p class="text-sm text-gray-600 mt-1">
+        <span id="clientCurrentQuestion">0</span> / <span id="clientTotalQuestions">0</span>
+      </p>
+    </div>
+
+    <div class="text-center mb-6">
+      <p id="clientQuestionWord" class="text-3xl font-bold text-gray-800 mb-3"></p>
+      <button id="clientSoundBtn" class="text-indigo-500 hover:text-indigo-700 mb-2 text-sm">🔊 발음 듣기</button>
+      <p id="clientSourceText" class="text-gray-500 text-sm"></p>
+    </div>
+
+    <div id="clientOptionsContainer" class="space-y-2"></div>
+  </div>
+</div>
+
+<script>
+// Debug helper: visible debug panel + logger
+function debugLog(msg){
+  try{
+    const panel = document.getElementById('debugPanel');
+    if(panel){
+      const entry = document.createElement('div');
+      entry.style.padding = '4px 6px';
+      entry.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+      entry.innerText = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+      panel.prepend(entry);
+    }
+  }catch(e){/* ignore */}
+  console.log(msg);
+}
+
+// Utility: Fisher-Yates shuffle (returns a new array)
+function shuffle(arr) {
+  if (!Array.isArray(arr)) return [];
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// get the word under pointer (x,y)
+function getWordAtPoint(x, y) {
+  let range;
+  if (document.caretRangeFromPoint) {
+    range = document.caretRangeFromPoint(x, y);
+  } else if (document.caretPositionFromPoint) {
+    const pos = document.caretPositionFromPoint(x, y);
+    range = document.createRange();
+    range.setStart(pos.offsetNode, pos.offset);
+    range.setEnd(pos.offsetNode, pos.offset);
+  }
+  if (!range) return '';
+  const node = range.startContainer;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return '';
+  const text = node.textContent;
+  const offset = range.startOffset;
+  let start = offset, end = offset;
+  // accept letters (including non-ascii) and hyphens/apostrophes
+  const isChar = ch => /[\p{L}\-']/u.test(ch);
+  while (start > 0 && isChar(text[start - 1])) start--;
+  while (end < text.length && isChar(text[end])) end++;
+  return text.slice(start, end).trim();
+}
+
+// Add word to server and return response
+async function addWordFromText(textId, word) {
+  try {
+    const res = await fetch('/api/add_word', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text_id: textId, word })
+    });
+    return await res.json();
+  } catch (err) {
+    debugLog('[ERROR] addWordFromText failed: ' + err);
+    return null;
+  }
+}
+
+// Remove word from server
+async function removeWordFromText(textId, word) {
+  try {
+    const res = await fetch('/api/remove_word', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text_id: textId, word })
+    });
+    return await res.json();
+  } catch (err) {
+    debugLog('[ERROR] removeWordFromText failed: ' + err);
+    return null;
+  }
+}
+
+// Un-highlight all occurrences of a word in the modal
+function unhighlightWordInModal(word) {
+  if (!word) return;
+  const modalContent = document.getElementById('modalContent');
+  if (!modalContent) return;
+  const escaped = word.replace(/[-\\/\\^$*+?.()|[\\]{}]/g, '\\$&');
+  const re = new RegExp('<mark[^>]*>\\s*(' + escaped + ')\\s*<\\/mark>', 'gi');
+  modalContent.innerHTML = modalContent.innerHTML.replace(re, function(m, p1){ return p1; });
+}
+
+// Highlight a single word in the modal body (wrap with <mark>)
+// learned: true => green; false => yellow
+function highlightWordInModal(word, learned=false) {
+  if (!word) return;
+  const modalContent = document.getElementById('modalContent');
+  if (!modalContent) return;
+  const escaped = word.replace(/[-\\/\\^$*+?.()|[\\]{}]/g, '\\$&');
+  const re = new RegExp('\\b' + escaped + '\\b', 'gi');
+  const cls = learned ? 'bg-green-200 text-green-800 rounded px-0.5' : 'bg-yellow-200 rounded px-0.5';
+  modalContent.innerHTML = modalContent.innerHTML.replace(re, function(m){
+    return `<mark class="${cls}">${m}</mark>`;
+  });
+}
+
+// Show a small temporary badge at (x,y)
+function showTempBadge(x, y, text) {
+  const badge = document.createElement('div');
+  badge.innerText = text || '추가됨';
+  badge.style.position = 'fixed';
+  badge.style.left = (x + 6) + 'px';
+  badge.style.top = (y + 6) + 'px';
+  badge.style.background = 'rgba(59,130,246,0.95)';
+  badge.style.color = '#fff';
+  badge.style.padding = '6px 8px';
+  badge.style.borderRadius = '6px';
+  badge.style.zIndex = 99999;
+  badge.style.fontSize = '12px';
+  document.body.appendChild(badge);
+  setTimeout(()=> { badge.style.transition = 'opacity 0.4s'; badge.style.opacity = '0'; setTimeout(()=>badge.remove(), 450); }, 900);
+}
+
+// Client test state
+let clientQuestions = [];
+let clientCurrentIndex = 0;
+let clientScore = 0;
+let clientTotal = 0;
+let clientStartTime;
+let clientWrongWords = [];
+
+function startClientTest(words) {
+  clientQuestions = shuffle(words);
+  clientCurrentIndex = 0;
+  clientScore = 0;
+  clientWrongWords = [];
+  clientTotal = clientQuestions.length;
+
+  document.getElementById('clientTotalQuestions').innerText = clientTotal;
+  document.getElementById('clientTestModal').classList.remove('hidden');
+  clientStartTime = new Date();
+  showClientQuestion();
+}
+
+function showClientQuestion() {
+  const q = clientQuestions[clientCurrentIndex];
+  document.getElementById('clientQuestionWord').innerText = q.word;
+  document.getElementById('clientSourceText').innerText = '출처: ' + (q.text_title || '');
+  document.getElementById('clientCurrentQuestion').innerText = clientCurrentIndex + 1;
+  document.getElementById('clientProgressBar').style.width = ((clientCurrentIndex) / clientTotal * 100) + '%';
+
+  const allMeanings = clientQuestions.map(x => x.meaning);
+  const options = [q.meaning, ...shuffle(allMeanings.filter(m => m !== q.meaning)).slice(0,3)];
+  renderClientOptions(shuffle(options), q.meaning);
+}
+
+function renderClientOptions(options, correct) {
+  const container = document.getElementById('clientOptionsContainer');
+  container.innerHTML = '';
+  options.forEach((opt, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'w-full border border-gray-300 rounded-lg py-2 text-gray-800 hover:bg-indigo-50 transition';
+    btn.innerHTML = `<span class="font-semibold mr-2">${String.fromCharCode(65 + idx)}.</span> ${opt}`;
+    btn.onclick = () => clientCheckAnswer(opt === correct, btn, correct);
+    container.appendChild(btn);
+  });
+}
+
+function clientCheckAnswer(isCorrect, btn, correct) {
+  const buttons = document.querySelectorAll('#clientOptionsContainer button');
+  buttons.forEach(b => b.disabled = true);
+  const q = clientQuestions[clientCurrentIndex];
+  if (isCorrect) {
+    btn.classList.add('bg-green-500', 'text-white');
+    clientScore++;
+  } else {
+    btn.classList.add('bg-red-500', 'text-white');
+    const correctBtn = Array.from(buttons).find(b => b.innerText.includes(correct));
+    if (correctBtn) correctBtn.classList.add('bg-green-500', 'text-white');
+    clientWrongWords.push({ word: q.word, meaning: q.meaning });
+  }
+
+  setTimeout(() => {
+    clientCurrentIndex++;
+    if (clientCurrentIndex < clientTotal) showClientQuestion();
+    else clientFinishTest();
+  }, 1000);
+}
+
+function clientFinishTest() {
+  const endTime = new Date();
+  const duration = Math.floor((endTime - clientStartTime) / 1000);
+  const percent = Math.round((clientScore / clientTotal) * 100);
+
+  // Save results
+  fetch('/save_test_result', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ test_name: clientQuestions[0]?.text_title || 'Unknown', total_questions: clientTotal, correct_answers: clientScore, score: percent, duration: duration, wrong_words: clientWrongWords })
+  }).then(res => res.json()).then(data => {
+    alert('테스트 완료: ' + percent + '%');
+    closeClientTestModal();
+    location.reload();
+  }).catch(() => { alert('결과 저장 실패'); closeClientTestModal(); });
+}
+
+function closeClientTestModal() {
+  document.getElementById('clientTestModal').classList.add('hidden');
+}
+</script>
+
+<!-- Debug panel (visible) -->
+<div id="debugPanel" style="position:fixed; left:10px; bottom:10px; background:rgba(0,0,0,0.8); color:#fff; padding:8px; border-radius:6px; max-width:320px; font-size:12px; opacity:0.95; z-index:9999; max-height:220px; overflow:auto;">Debug panel</div>
+
+<script>
+// Global error handlers to surface runtime issues in the debug panel
+window.addEventListener('error', function(e){
+  try { debugLog('[ERROR] ' + (e.message || e) + ' (' + (e.filename || '') + ':' + (e.lineno || '') + ')'); } catch(_){}
+});
+window.addEventListener('unhandledrejection', function(e){
+  try { debugLog('[ERROR] Unhandled promise rejection: ' + (e.reason && e.reason.message ? e.reason.message : JSON.stringify(e.reason))); } catch(_){}
+});
+
+// attach click listener safely on DOMContentLoaded
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    debugLog('[DEBUG] DOMContentLoaded fired');
+    const btn = document.getElementById('openUnknownTestBtn');
+    if(btn){ btn.addEventListener('click', openUnknownTestModal); debugLog('[DEBUG] attached click listener to openUnknownTestBtn'); }
+    debugLog('[DEBUG] Debug panel initialized');
+  }catch(err){ console.error(err); debugLog('[ERROR] DOMContentLoaded handler error: ' + err); }
+});
 </script>
 
 {% endblock %}
