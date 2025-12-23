@@ -17,6 +17,29 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
+# Convenience helper: low-level DBAPI connection context manager
+from contextlib import contextmanager
+
+@contextmanager
+def get_conn():
+    """Yield a raw DBAPI connection from SQLAlchemy's engine.
+
+    Usage:
+        with get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(...)
+            rows = cur.fetchall()
+    This mirrors the low-level connection style used in some `Quality/*` scripts.
+    """
+    conn = db.engine.raw_connection()
+    try:
+        yield conn
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 
 # ✅ WordsRow 모델
 class WordsRow(db.Model):
@@ -57,6 +80,7 @@ def index():
     t.source,
     t.content,
     ISNULL(w.word_count, 0) AS word_count,
+    ISNULL(l.learned_count, 0) AS learned_count,
     ISNULL(tc.test_count, 0) AS test_count
 FROM text_records_rows t
 
@@ -65,6 +89,13 @@ LEFT JOIN (
     FROM words_rows
     GROUP BY text_id
 ) w ON t.id = w.text_id
+
+LEFT JOIN (
+    SELECT text_id, COUNT(*) AS learned_count
+    FROM words_rows
+    WHERE ISNULL(is_learned, 0) = 1
+    GROUP BY text_id
+) l ON t.id = l.text_id
 
 LEFT JOIN (
     SELECT
@@ -109,16 +140,6 @@ def text_records():
 
 
 
-    # ✅ 출처 목록 (중복 제거)
-    sources = db.session.execute(text("""
-        SELECT DISTINCT source FROM text_records_rows
-        WHERE source IS NOT NULL AND source <> ''
-    """)).fetchall()
-
-    # ✅ sources 함께 전달
-    return render_template('index.html', 
-                           texts=texts, 
-                           sources=[row.source for row in sources])
 
 
 
@@ -170,27 +191,64 @@ def save_test_result():
 def flashcards(text_id):
     words = WordsRow.query.filter_by(text_id=text_id).all()
     word_list = [{"word": w.word, "meaning": w.meaning, "text_title": w.text_title} for w in words]
-    return render_template('flashcard_modal.html', words=word_list)
+    return render_template('flashcard_modal.html', words=word_list, text_id=text_id)
+
+
+# ✅ API: refresh counts for a text (word_count, test_count)
+@app.route('/_refresh_text_counts/<text_id>')
+def refresh_text_counts(text_id):
+    wc_row = db.session.execute(text("SELECT COUNT(*) AS cnt FROM words_rows WHERE text_id = :text_id"), {"text_id": text_id}).fetchone()
+    word_count = wc_row.cnt if hasattr(wc_row, 'cnt') else (wc_row[0] if wc_row else 0)
+
+    tc_row = db.session.execute(text("SELECT COUNT(*) AS cnt FROM test_records_rows WHERE LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1) = :text_id"), {"text_id": text_id}).fetchone()
+    test_count = tc_row.cnt if hasattr(tc_row, 'cnt') else (tc_row[0] if tc_row else 0)
+
+    return jsonify({"word_count": int(word_count), "test_count": int(test_count)})
 
 
 # ✅ 학습 로그 페이지
 @app.route('/learning_log')
 def learning_log():
-    query = text("""
-        SELECT id, test_name, total_questions, correct_answers, score, duration, completed_at, test_words
-        FROM test_records_rows
-        ORDER BY completed_at DESC
-    """)
-    logs = db.session.execute(query).fetchall()
+    q = request.args.get('q', '').strip()
 
-    summary_query = text("""
-        SELECT test_name, COUNT(*) AS test_count
-        FROM test_records_rows
-        GROUP BY test_name
-        ORDER BY test_count DESC
-    """)
-    summary_rows = db.session.execute(summary_query).fetchall()
+    if q:
+        logs_query = text("""
+            SELECT id, test_name, total_questions, correct_answers, score, duration, completed_at, test_words
+            FROM test_records_rows
+            WHERE test_name LIKE :q
+            ORDER BY completed_at DESC
+        """)
+        logs = db.session.execute(logs_query, {"q": f"%{q}%"}).fetchall()
+
+        summary_query = text("""
+            SELECT test_name, COUNT(*) AS test_count
+            FROM test_records_rows
+            WHERE test_name LIKE :q
+            GROUP BY test_name
+            ORDER BY test_count DESC
+        """)
+        summary_rows = db.session.execute(summary_query, {"q": f"%{q}%"}).fetchall()
+    else:
+        logs_query = text("""
+            SELECT id, test_name, total_questions, correct_answers, score, duration, completed_at, test_words
+            FROM test_records_rows
+            ORDER BY completed_at DESC
+        """)
+        logs = db.session.execute(logs_query).fetchall()
+
+        summary_query = text("""
+            SELECT test_name, COUNT(*) AS test_count
+            FROM test_records_rows
+            GROUP BY test_name
+            ORDER BY test_count DESC
+        """)
+        summary_rows = db.session.execute(summary_query).fetchall()
+
     summary = [{"test_name": r.test_name, "test_count": r.test_count} for r in summary_rows]
+
+    # distinct test names for datalist/autocomplete
+    tn_rows = db.session.execute(text("SELECT DISTINCT test_name FROM test_records_rows ORDER BY test_name")).fetchall()
+    test_names = [r.test_name for r in tn_rows]
 
     formatted_logs = []
     for row in logs:
@@ -209,7 +267,7 @@ def learning_log():
             "test_words": wrong_list
         })
 
-    return render_template('learning_log.html', logs=formatted_logs, summary=summary)
+    return render_template('learning_log.html', logs=formatted_logs, summary=summary, q=q, test_names=test_names)
 
 
 # ✅ 발음 듣기 (미국식)
@@ -347,6 +405,7 @@ def get_words_by_text(text_id):
     return jsonify([{"id": r.id, "word": r.word, "meaning": r.meaning ,"is_learned": int(r.is_learned or 0)} for r in result])
 
 
+
 # ✅ 단어 수정
 @app.route('/update_word', methods=['POST'])
 def update_word():
@@ -384,24 +443,6 @@ def get_sources():
     result = db.session.execute(query).fetchall()
     return jsonify([{"source": r[0]} for r in result])
 
-@app.route("/get_words/<text_id>", endpoint="get_words_api")
-def get_words(text_id):
-    with get_conn() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id, word, meaning, ISNULL(is_learned, 0) AS is_learned
-            FROM words_rows
-            WHERE text_id = ?
-            ORDER BY word
-        """, (text_id,))
-        rows = cur.fetchall()
-
-    return jsonify([{
-        "id": r.id,
-        "word": r.word,
-        "meaning": r.meaning,
-        "is_learned": int(r.is_learned)  # tinyint → int로
-    } for r in rows])
 
 @app.route("/api/word/learned", methods=["POST"])
 def api_word_learned():
@@ -434,6 +475,84 @@ def get_titles_by_source(source):
     """)
     result = db.session.execute(query, {"source": source}).fetchall()
     return jsonify([{"id": r[0], "title": r[1]} for r in result])
+
+
+# ✅ API: get unlearned words across multiple texts
+from sqlalchemy import or_
+
+@app.route('/api/unlearned_words', methods=['POST'])
+def api_unlearned_words():
+    data = request.get_json(force=True)
+    text_ids = data.get('text_ids', [])
+    if not text_ids:
+        return jsonify({"error": "텍스트를 하나 이상 선택하세요."}), 400
+
+    # Use ORM filter to find words where is_learned is False or NULL
+    rows = WordsRow.query.filter(WordsRow.text_id.in_(text_ids)).filter(
+        or_(WordsRow.is_learned == False, WordsRow.is_learned.is_(None))
+    ).all()
+
+    return jsonify([
+        {"id": w.id, "word": w.word, "meaning": w.meaning, "text_title": w.text_title}
+        for w in rows
+    ])
+
+
+# ✅ API: add a single word from text view (idempotent)
+@app.route('/api/add_word', methods=['POST'])
+def api_add_word():
+    data = request.get_json(force=True)
+    text_id = data.get('text_id')
+    word = (data.get('word') or '').strip()
+    meaning = (data.get('meaning') or '').strip()
+    if not text_id or not word:
+        return jsonify({"error": "text_id and word are required"}), 400
+
+    # check if already exists
+    exists = db.session.execute(text("SELECT id FROM words_rows WHERE text_id = :text_id AND word = :word"), {"text_id": text_id, "word": word}).fetchone()
+    if exists:
+        return jsonify({"ok": True, "created": False, "id": exists.id})
+
+    # get text title
+    r = db.session.execute(text("SELECT title FROM text_records_rows WHERE id = :id"), {"id": text_id}).fetchone()
+    text_title = r.title if r else "(제목 없음)"
+
+    # new id
+    last = db.session.execute(text("SELECT MAX(CAST(id AS INT)) AS max_id FROM words_rows")).fetchone()
+    new_id = str((last.max_id or 0) + 1)
+    now = datetime.now().isoformat(timespec='seconds')
+
+    insert_q = text("""
+        INSERT INTO words_rows
+            (id, word, meaning, is_learned, text_id, text_title, added_at, created_at, updated_at)
+        VALUES
+            (:id, :word, :meaning, 0, :text_id, :text_title, :now, :now, :now)
+    """)
+
+    db.session.execute(insert_q, {"id": new_id, "word": word, "meaning": meaning, "text_id": text_id, "text_title": text_title, "now": now})
+    db.session.commit()
+
+    return jsonify({"ok": True, "created": True, "id": new_id, "word": word})
+
+
+# ✅ API: remove a single word (by text_id + word)
+@app.route('/api/remove_word', methods=['POST'])
+def api_remove_word():
+    data = request.get_json(force=True)
+    text_id = data.get('text_id')
+    word = (data.get('word') or '').strip()
+    if not text_id or not word:
+        return jsonify({"error": "text_id and word are required"}), 400
+
+    # count existing
+    cnt_row = db.session.execute(text("SELECT COUNT(*) AS cnt FROM words_rows WHERE text_id = :text_id AND word = :word"), {"text_id": text_id, "word": word}).fetchone()
+    cnt = cnt_row.cnt if hasattr(cnt_row, 'cnt') else (cnt_row[0] if cnt_row else 0)
+    if cnt == 0:
+        return jsonify({"ok": True, "deleted": False, "deleted_count": 0})
+
+    db.session.execute(text("DELETE FROM words_rows WHERE text_id = :text_id AND word = :word"), {"text_id": text_id, "word": word})
+    db.session.commit()
+    return jsonify({"ok": True, "deleted": True, "deleted_count": cnt})
 
 # ✅ 서버 실행
 if __name__ == '__main__':
