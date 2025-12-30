@@ -1,3 +1,14 @@
 body { font-family: 'Pretendard', sans-serif; }
 .word { margin: 0 2px; }
 #popup { width: 250px; border-radius: 8px; }
+.bi {
+  font-size: 14px;
+}
+
+/* Hide action buttons by default; show on row hover */
+.word-row .actions { opacity: 0; transition: opacity .15s ease-in-out; }
+.word-row:hover .actions { opacity: 1; }
+
+/* Slightly smaller icon buttons */
+.word-row .actions button { font-size: 14px; padding: .25rem .4rem; }
+
