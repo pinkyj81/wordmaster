@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="text-2xl font-semibold mb-6 text-gray-800">단어 관리</h2>
+
+<!-- 출처 선택 -->
+<div class="mb-4">
+  <label class="block mb-2 text-gray-700 font-medium">출처 선택</label>
+  <select id="sourceSelector" class="border rounded px-3 py-2 w-full max-w-md" onchange="loadTitlesBySource()">
+    <option value="">출처를 선택하세요</option>
+    {% for src in sources %}
+      <option value="{{ src }}">{{ src }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<!-- 텍스트 제목 선택 -->
+<div class="mb-6">
+  <label class="block mb-2 text-gray-700 font-medium">텍스트 선택</label>
+  <select id="textSelector" class="border rounded px-3 py-2 w-full max-w-md" onchange="loadWordsByText()">
+    <option value="">제목을 선택하세요</option>
+  </select>
+</div>
+
+<!-- 단어 목록 테이블 -->
+<div id="wordListContainer" class="hidden">
+  <div class="flex justify-between items-center mb-4">
+    <h3 class="text-xl font-semibold text-gray-700">단어 목록</h3>
+    <span id="wordCount" class="text-sm text-gray-600"></span>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border-collapse bg-white shadow-sm rounded-lg">
+      <thead>
+        <tr class="bg-gradient-to-r from-purple-100 to-indigo-100">
+          <th class="border px-4 py-3 text-left font-semibold text-gray-700 w-12">
+            <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
+          </th>
+          <th class="border px-4 py-3 text-left font-semibold text-gray-700 w-16">ID</th>
+          <th class="border px-4 py-3 text-left font-semibold text-gray-700 w-48">단어</th>
+          <th class="border px-4 py-3 text-left font-semibold text-gray-700">뜻</th>
+          <th class="border px-4 py-3 text-left font-semibold text-gray-700">예문</th>
+          <th class="border px-4 py-3 text-center font-semibold text-gray-700 w-24">암기</th>
+          <th class="border px-4 py-3 text-center font-semibold text-gray-700 w-32">작업</th>
+        </tr>
+      </thead>
+      <tbody id="wordListTable">
+        <!-- 동적으로 채워집니다 -->
+      </tbody>
+    </table>
+  </div>
+
+  <div class="mt-4 flex justify-end">
+    <button onclick="deleteSelectedWords()" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition">
+      선택 삭제
+    </button>
+  </div>
+</div>
+
+<script>
+let currentTextId = null;
+
+// 출처별 텍스트 목록 로드
+function loadTitlesBySource() {
+  const source = document.getElementById('sourceSelector').value;
+  const textSelector = document.getElementById('textSelector');
+  textSelector.innerHTML = '<option value="">제목을 선택하세요</option>';
+  
+  document.getElementById('wordListContainer').classList.add('hidden');
+  
+  if (!source) return;
+
+  fetch(`/get_titles_by_source/${encodeURIComponent(source)}`)
+    .then(res => res.json())
+    .then(titles => {
+      titles.forEach(t => {
+        const option = document.createElement('option');
+        option.value = t.id;
+        option.textContent = t.title;
+        textSelector.appendChild(option);
+      });
+    })
+    .catch(err => {
+      console.error('텍스트 목록 로드 실패:', err);
+      alert('텍스트 목록을 불러오는데 실패했습니다.');
+    });
+}
+
+// 텍스트별 단어 목록 로드
+function loadWordsByText() {
+  const textId = document.getElementById('textSelector').value;
+  
+  if (!textId) {
+    document.getElementById('wordListContainer').classList.add('hidden');
+    return;
+  }
+
+  currentTextId = textId;
+
+  fetch(`/get_words_by_text/${textId}`)
+    .then(res => res.json())
+    .then(words => {
+      const tbody = document.getElementById('wordListTable');
+      tbody.innerHTML = '';
+      
+      document.getElementById('wordCount').textContent = `총 ${words.length}개`;
+      document.getElementById('wordListContainer').classList.remove('hidden');
+
+      if (words.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="border px-4 py-3 text-center text-gray-500">등록된 단어가 없습니다.</td></tr>';
+        return;
+      }
+
+      words.forEach(word => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-50';
+        tr.dataset.wordId = word.id;
+        
+        const isLearned = word.is_learned ? 'checked' : '';
+        
+        tr.innerHTML = `
+          <td class="border px-4 py-2 text-center">
+            <input type="checkbox" class="word-checkbox" data-word-id="${word.id}">
+          </td>
+          <td class="border px-4 py-2">${word.id}</td>
+          <td class="border px-4 py-2">
+            <input type="text" id="word-${word.id}" value="${word.word}" 
+                   class="w-full px-2 py-1 border rounded focus:border-blue-500">
+          </td>
+          <td class="border px-4 py-2">
+            <input type="text" id="meaning-${word.id}" value="${word.meaning}" 
+                   class="w-full px-2 py-1 border rounded focus:border-blue-500">
+          </td>
+          <td class="border px-4 py-2">
+            <textarea id="example-${word.id}" 
+                      class="w-full px-2 py-1 border rounded focus:border-blue-500 resize-none" 
+                      rows="2">${word.example || ''}</textarea>
+          </td>
+          <td class="border px-4 py-2 text-center">
+            <input type="checkbox" ${isLearned} onchange="toggleLearned(${word.id}, this)">
+          </td>
+          <td class="border px-4 py-2 text-center space-x-1">
+            <button onclick="updateWord(${word.id})" 
+                    class="bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 text-xs">
+              수정
+            </button>
+            <button onclick="deleteWord(${word.id})" 
+                    class="bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600 text-xs">
+              삭제
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(err => {
+      console.error('단어 목록 로드 실패:', err);
+      alert('단어 목록을 불러오는데 실패했습니다.');
+    });
+}
+
+// 전체 선택/해제
+function toggleSelectAll(checkbox) {
+  const checkboxes = document.querySelectorAll('.word-checkbox');
+  checkboxes.forEach(cb => cb.checked = checkbox.checked);
+}
+
+// 암기 상태 토글
+function toggleLearned(wordId, checkbox) {
+  fetch('/api/word/learned', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      word_id: wordId, 
+      is_learned: checkbox.checked 
+    })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (!data.ok) {
+        alert('암기 상태 업데이트 실패');
+        checkbox.checked = !checkbox.checked;
+      }
+    })
+    .catch(err => {
+      console.error('암기 상태 업데이트 실패:', err);
+      alert('암기 상태 업데이트에 실패했습니다.');
+      checkbox.checked = !checkbox.checked;
+    });
+}
+
+// 단어 수정
+function updateWord(wordId) {
+  const word = document.getElementById(`word-${wordId}`).value.trim();
+  const meaning = document.getElementById(`meaning-${wordId}`).value.trim();
+  const example = document.getElementById(`example-${wordId}`).value.trim();
+
+  if (!word || !meaning) {
+    alert('단어와 뜻을 모두 입력하세요.');
+    return;
+  }
+
+  fetch('/update_word', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      id: wordId, 
+      word: word, 
+      meaning: meaning,
+      example: example
+    })
+  })
+    .then(res => res.json())
+    .then(data => {
+      alert(data.message || '수정되었습니다.');
+    })
+    .catch(err => {
+      console.error('단어 수정 실패:', err);
+      alert('단어 수정에 실패했습니다.');
+    });
+}
+
+// 단어 삭제
+function deleteWord(wordId) {
+  if (!confirm('정말 삭제하시겠습니까?')) return;
+
+  fetch(`/delete_word/${wordId}`, { method: 'DELETE' })
+    .then(res => res.json())
+    .then(data => {
+      alert(data.message || '삭제되었습니다.');
+      loadWordsByText();
+    })
+    .catch(err => {
+      console.error('단어 삭제 실패:', err);
+      alert('단어 삭제에 실패했습니다.');
+    });
+}
+
+// 선택된 단어 삭제
+function deleteSelectedWords() {
+  const checkboxes = document.querySelectorAll('.word-checkbox:checked');
+  
+  if (checkboxes.length === 0) {
+    alert('삭제할 단어를 선택하세요.');
+    return;
+  }
+
+  if (!confirm(`선택한 ${checkboxes.length}개의 단어를 삭제하시겠습니까?`)) return;
+
+  const wordIds = Array.from(checkboxes).map(cb => cb.dataset.wordId);
+  
+  Promise.all(wordIds.map(id => fetch(`/delete_word/${id}`, { method: 'DELETE' })))
+    .then(() => {
+      alert('삭제되었습니다.');
+      loadWordsByText();
+    })
+    .catch(err => {
+      console.error('단어 삭제 실패:', err);
+      alert('일부 단어 삭제에 실패했습니다.');
+      loadWordsByText();
+    });
+}
+</script>
+
+{% endblock %}

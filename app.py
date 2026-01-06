@@ -1,13 +1,16 @@
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 from datetime import datetime
 from gtts import gTTS
+from functools import wraps
 import io
 import uuid
 import json
+import os
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)  # 세션 암호화 키
 
 # ✅ SQL Server 연결 (SSL 인증서 허용)
 app.config['SQLALCHEMY_DATABASE_URI'] = (
@@ -16,6 +19,32 @@ app.config['SQLALCHEMY_DATABASE_URI'] = (
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+
+# ✅ 사용자 목록 (간단한 구현)
+USERS = [
+    {"id": "user1", "name": "박영진"},
+    {"id": "user2", "name": "권혁재"},
+    {"id": "user3", "name": "권유현"},
+    {"id": "user4", "name": "GUEST"},
+]
+
+# ✅ 로그인 체크 데코레이터
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ✅ 현재 로그인한 사용자의 출처 목록 가져오기
+def get_user_sources():
+    """현재 로그인한 사용자가 등록한 출처 목록 반환"""
+    if 'user_name' not in session:
+        return []
+    user_name = session['user_name']
+    sources = WordUser.query.filter_by(user_name=user_name).all()
+    return [s.source for s in sources]
 
 # Convenience helper: low-level DBAPI connection context manager
 from contextlib import contextmanager
@@ -71,9 +100,48 @@ class TestRecord(db.Model):
     test_words = db.Column(db.String)
     created_at = db.Column(db.DateTime)
 
+# ✅ 사용자-소스 매핑 모델
+class WordUser(db.Model):
+    __tablename__ = 'word_users'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_name = db.Column(db.String(50), nullable=False)
+    source = db.Column(db.String(50), nullable=False)
+
+# ✅ 로그인 페이지
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        user_id = request.form.get('user_id')
+        user = next((u for u in USERS if u['id'] == user_id), None)
+        if user:
+            session['user_id'] = user['id']
+            session['user_name'] = user['name']
+            return redirect(url_for('index'))
+        else:
+            return render_template('login.html', users=USERS, error='사용자를 선택하세요.')
+    return render_template('login.html', users=USERS)
+
+# ✅ 로그아웃
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
 @app.route('/')
+@login_required
 def index():
-    query = text("""
+    # 사용자가 등록한 출처 목록
+    user_sources = get_user_sources()
+    
+    if not user_sources:
+        # 등록된 출처가 없으면 빈 목록 반환
+        return render_template('index.html', texts=[], sources=[])
+    
+    # IN 절을 위한 파라미터 생성
+    source_params = {f'src{i}': src for i, src in enumerate(user_sources)}
+    source_placeholders = ', '.join([f':src{i}' for i in range(len(user_sources))])
+    
+    query = text(f"""
         SELECT
     t.id,
     t.title,
@@ -105,37 +173,37 @@ LEFT JOIN (
     GROUP BY LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1)
 ) tc ON t.id = tc.text_id
 
+WHERE t.source IN ({source_placeholders})
+
 ORDER BY t.id ASC;
-
     """)
-    texts = db.session.execute(query).fetchall()
-
-    sources = db.session.execute(text("""
-        SELECT DISTINCT source 
-        FROM text_records_rows
-        WHERE source IS NOT NULL AND source <> ''
-    """)).fetchall()
+    texts = db.session.execute(query, source_params).fetchall()
 
     return render_template('index.html',
                            texts=texts,
-                           sources=[row.source for row in sources])
+                           sources=user_sources)
 
 
 @app.route('/text_records')
+@login_required
 def text_records():
-    # 기존 목록 쿼리
-    records = db.session.execute(text("SELECT * FROM text_records_rows ORDER BY id")).fetchall()
+    # 사용자가 등록한 출처 목록
+    user_sources = get_user_sources()
+    
+    if not user_sources:
+        return render_template('text_records.html', records=[], sources=[])
+    
+    # IN 절을 위한 파라미터 생성
+    source_params = {f'src{i}': src for i, src in enumerate(user_sources)}
+    source_placeholders = ', '.join([f':src{i}' for i in range(len(user_sources))])
+    
+    # 사용자 출처에 해당하는 텍스트만 조회
+    query = text(f"SELECT * FROM text_records_rows WHERE source IN ({source_placeholders}) ORDER BY id")
+    records = db.session.execute(query, source_params).fetchall()
 
-    # ✅ 출처 목록 (중복 제거)
-    sources = db.session.execute(text("""
-        SELECT DISTINCT source FROM text_records_rows
-        WHERE source IS NOT NULL AND source <> ''
-    """)).fetchall()
-
-    # ✅ sources를 템플릿으로 전달
     return render_template('text_records.html', 
                            records=records, 
-                           sources=[row.source for row in sources])
+                           sources=user_sources)
 
 
 
@@ -207,6 +275,13 @@ def refresh_text_counts(text_id):
 
 
 # ✅ 학습 로그 페이지
+# ✅ 단어 관리 전체 화면 페이지
+@app.route('/word_management')
+@login_required
+def word_management():
+    user_sources = get_user_sources()
+    return render_template('word_management.html', sources=user_sources)
+
 @app.route('/learning_log')
 def learning_log():
     q = request.args.get('q', '').strip()
@@ -298,7 +373,12 @@ def update_text():
 @app.route('/get_words/<text_id>')
 def get_words(text_id):
     words = WordsRow.query.filter_by(text_id=text_id).all()
-    return jsonify([{"id": w.id, "word": w.word, "meaning": w.meaning} for w in words])
+    return jsonify([{
+        "id": w.id, 
+        "word": w.word, 
+        "meaning": w.meaning,
+        "example": w.example or ""
+    } for w in words])
 
 
 # ✅ 단어 수정 API
@@ -363,10 +443,10 @@ def upload_words():
             insert_query = text("""
                 INSERT INTO words_rows
                     (id, word, meaning, is_learned, text_id, text_title,
-                     added_at, created_at, updated_at)
+                     added_at, created_at, updated_at, example)
                 VALUES
                     (:id, :word, :meaning, 0, :text_id, :text_title,
-                     :now, :now, :now)
+                     :now, :now, :now, :example)
             """)
             db.session.execute(insert_query, {
                 "id": str(current_max_id),
@@ -374,7 +454,8 @@ def upload_words():
                 "meaning": w["meaning"],
                 "text_id": text_id,
                 "text_title": text_title,
-                "now": now
+                "now": now,
+                "example": w.get("example", "")
             })
 
         db.session.commit()
@@ -384,11 +465,20 @@ def upload_words():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-# ✅ 텍스트 제목 리스트 반환
+# ✅ 텍스트 제목 리스트 반환 (사용자 출처만)
 @app.route('/get_text_titles')
+@login_required
 def get_text_titles():
-    query = text("SELECT id, title FROM text_records_rows ORDER BY title ASC")
-    result = db.session.execute(query).fetchall()
+    user_sources = get_user_sources()
+    
+    if not user_sources:
+        return jsonify([])
+    
+    source_params = {f'src{i}': src for i, src in enumerate(user_sources)}
+    source_placeholders = ', '.join([f':src{i}' for i in range(len(user_sources))])
+    
+    query = text(f"SELECT id, title FROM text_records_rows WHERE source IN ({source_placeholders}) ORDER BY title ASC")
+    result = db.session.execute(query, source_params).fetchall()
     return jsonify([{"id": r.id, "title": r.title} for r in result])
 
 
@@ -396,13 +486,19 @@ def get_text_titles():
 @app.route('/get_words_by_text/<text_id>')
 def get_words_by_text(text_id):
     query = text("""
-        SELECT id, word, meaning , ISNULL(is_learned, 0) AS is_learned
+        SELECT id, word, meaning, ISNULL(is_learned, 0) AS is_learned, example
         FROM words_rows
         WHERE text_id = :text_id
         ORDER BY word ASC
     """)
     result = db.session.execute(query, {"text_id": text_id}).fetchall()
-    return jsonify([{"id": r.id, "word": r.word, "meaning": r.meaning ,"is_learned": int(r.is_learned or 0)} for r in result])
+    return jsonify([{
+        "id": r.id, 
+        "word": r.word, 
+        "meaning": r.meaning,
+        "is_learned": int(r.is_learned or 0),
+        "example": r.example or ""
+    } for r in result])
 
 
 
@@ -413,15 +509,17 @@ def update_word():
     word_id = data.get('id')
     word = data.get('word')
     meaning = data.get('meaning')
+    example = data.get('example', '')
 
     query = text("""
         UPDATE words_rows
         SET word = :word,
             meaning = :meaning,
+            example = :example,
             updated_at = SYSDATETIMEOFFSET()
         WHERE id = :id
     """)
-    db.session.execute(query, {"id": word_id, "word": word, "meaning": meaning})
+    db.session.execute(query, {"id": word_id, "word": word, "meaning": meaning, "example": example})
     db.session.commit()
     return jsonify({"message": "단어가 수정되었습니다."})
 # ✅ 단어 삭제
@@ -433,15 +531,11 @@ def delete_word(word_id):
     return jsonify({"message": "단어가 삭제되었습니다."})
 
 @app.route('/get_sources')
+@login_required
 def get_sources():
-    query = text("""
-        SELECT DISTINCT source
-        FROM text_records_rows
-        WHERE source IS NOT NULL AND source <> ''
-        ORDER BY source
-    """)
-    result = db.session.execute(query).fetchall()
-    return jsonify([{"source": r[0]} for r in result])
+    """현재 로그인한 사용자가 등록한 출처 목록만 반환"""
+    user_sources = get_user_sources()
+    return jsonify([{"source": src} for src in sorted(user_sources)])
 
 
 @app.route("/api/word/learned", methods=["POST"])
@@ -505,6 +599,7 @@ def api_add_word():
     text_id = data.get('text_id')
     word = (data.get('word') or '').strip()
     meaning = (data.get('meaning') or '').strip()
+    example = (data.get('example') or '').strip()
     if not text_id or not word:
         return jsonify({"error": "text_id and word are required"}), 400
 
@@ -524,12 +619,12 @@ def api_add_word():
 
     insert_q = text("""
         INSERT INTO words_rows
-            (id, word, meaning, is_learned, text_id, text_title, added_at, created_at, updated_at)
+            (id, word, meaning, is_learned, text_id, text_title, added_at, created_at, updated_at, example)
         VALUES
-            (:id, :word, :meaning, 0, :text_id, :text_title, :now, :now, :now)
+            (:id, :word, :meaning, 0, :text_id, :text_title, :now, :now, :now, :example)
     """)
 
-    db.session.execute(insert_q, {"id": new_id, "word": word, "meaning": meaning, "text_id": text_id, "text_title": text_title, "now": now})
+    db.session.execute(insert_q, {"id": new_id, "word": word, "meaning": meaning, "text_id": text_id, "text_title": text_title, "now": now, "example": example})
     db.session.commit()
 
     return jsonify({"ok": True, "created": True, "id": new_id, "word": word})
@@ -553,6 +648,100 @@ def api_remove_word():
     db.session.execute(text("DELETE FROM words_rows WHERE text_id = :text_id AND word = :word"), {"text_id": text_id, "word": word})
     db.session.commit()
     return jsonify({"ok": True, "deleted": True, "deleted_count": cnt})
+
+# ✅ 사용자 관리 API
+@app.route('/api/users', methods=['GET'])
+@login_required
+def api_get_users():
+    """모든 사용자-소스 매핑 목록 조회"""
+    users = WordUser.query.order_by(WordUser.user_name, WordUser.source).all()
+    return jsonify([{
+        "id": u.id,
+        "user_name": u.user_name,
+        "source": u.source
+    } for u in users])
+
+@app.route('/api/users', methods=['POST'])
+@login_required
+def api_add_user():
+    """사용자-소스 매핑 추가"""
+    try:
+        data = request.get_json()
+        user_name = data.get('user_name', '').strip()
+        source = data.get('source', '').strip()
+        
+        if not user_name or not source:
+            return jsonify({"error": "사용자명과 소스를 모두 입력하세요."}), 400
+        
+        # 중복 체크
+        exists = WordUser.query.filter_by(user_name=user_name, source=source).first()
+        if exists:
+            return jsonify({"error": "이미 등록된 사용자-소스 조합입니다."}), 400
+        
+        new_user = WordUser(user_name=user_name, source=source)
+        db.session.add(new_user)
+        db.session.commit()
+        
+        return jsonify({
+            "ok": True,
+            "id": new_user.id,
+            "user_name": new_user.user_name,
+            "source": new_user.source
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/users/<int:user_id>', methods=['PUT'])
+@login_required
+def api_update_user(user_id):
+    """사용자-소스 매핑 수정"""
+    try:
+        data = request.get_json()
+        user_name = data.get('user_name', '').strip()
+        source = data.get('source', '').strip()
+        
+        if not user_name or not source:
+            return jsonify({"error": "사용자명과 소스를 모두 입력하세요."}), 400
+        
+        user = WordUser.query.get(user_id)
+        if not user:
+            return jsonify({"error": "사용자를 찾을 수 없습니다."}), 404
+        
+        # 중복 체크 (본인 제외)
+        exists = WordUser.query.filter(
+            WordUser.user_name == user_name,
+            WordUser.source == source,
+            WordUser.id != user_id
+        ).first()
+        if exists:
+            return jsonify({"error": "이미 등록된 사용자-소스 조합입니다."}), 400
+        
+        user.user_name = user_name
+        user.source = source
+        db.session.commit()
+        
+        return jsonify({"ok": True, "message": "수정되었습니다."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/users/<int:user_id>', methods=['DELETE'])
+@login_required
+def api_delete_user(user_id):
+    """사용자-소스 매핑 삭제"""
+    try:
+        user = WordUser.query.get(user_id)
+        if not user:
+            return jsonify({"error": "사용자를 찾을 수 없습니다."}), 404
+        
+        db.session.delete(user)
+        db.session.commit()
+        
+        return jsonify({"ok": True, "message": "삭제되었습니다."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 # ✅ 서버 실행
 if __name__ == '__main__':

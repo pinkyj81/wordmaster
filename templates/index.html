@@ -913,6 +913,232 @@ function closeClientTestModal() {
 }
 </script>
 
+<!-- ✅ 사용자 관리 모달 -->
+<div id="userManagerModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl w-[90%] max-w-4xl p-8 max-h-[90vh] overflow-y-auto">
+    <div class="flex justify-between items-center border-b pb-3 mb-4">
+      <h3 class="text-2xl font-bold text-gray-800">사용자 관리</h3>
+      <button onclick="closeUserManager()" class="text-gray-500 hover:text-gray-700 text-3xl leading-none">&times;</button>
+    </div>
+
+    <!-- 추가 폼 -->
+    <div class="bg-gray-50 rounded-lg p-4 mb-6">
+      <h4 class="font-semibold text-lg mb-3 text-gray-700">새 사용자-출처 추가</h4>
+      <div class="flex gap-3 items-end">
+        <div class="flex-1">
+          <label class="block text-sm font-medium text-gray-700 mb-1">사용자명</label>
+          <input type="text" id="newUserName" class="w-full border rounded px-3 py-2" placeholder="예: 박영진">
+        </div>
+        <div class="flex-1">
+          <label class="block text-sm font-medium text-gray-700 mb-1">출처</label>
+          <select id="newUserSource" class="w-full border rounded px-3 py-2">
+            <option value="">출처를 선택하세요</option>
+            <!-- 동적으로 채워집니다 -->
+          </select>
+        </div>
+        <button onclick="addUser()" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition">
+          추가
+        </button>
+      </div>
+    </div>
+
+    <!-- 사용자 목록 테이블 -->
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm border-collapse">
+        <thead>
+          <tr class="bg-gradient-to-r from-purple-100 to-indigo-100">
+            <th class="border px-4 py-3 text-left font-semibold text-gray-700">ID</th>
+            <th class="border px-4 py-3 text-left font-semibold text-gray-700">사용자명</th>
+            <th class="border px-4 py-3 text-left font-semibold text-gray-700">출처</th>
+            <th class="border px-4 py-3 text-center font-semibold text-gray-700">작업</th>
+          </tr>
+        </thead>
+        <tbody id="userListTable">
+          <!-- 동적으로 채워집니다 -->
+        </tbody>
+      </table>
+    </div>
+
+    <div class="text-right mt-6">
+      <button onclick="closeUserManager()" class="px-6 py-2 bg-gray-200 rounded hover:bg-gray-300 transition">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// 사용자 관리 모달 열기
+function openUserManager() {
+  document.getElementById('userManagerModal').classList.remove('hidden');
+  loadSourceOptions();
+  loadUserList();
+}
+
+// 사용자 관리 모달 닫기
+function closeUserManager() {
+  document.getElementById('userManagerModal').classList.add('hidden');
+}
+
+// 출처 목록 로드
+function loadSourceOptions() {
+  fetch('/get_sources')
+    .then(res => res.json())
+    .then(sources => {
+      const select = document.getElementById('newUserSource');
+      select.innerHTML = '<option value="">출처를 선택하세요</option>';
+      sources.forEach(src => {
+        const option = document.createElement('option');
+        option.value = src.source;
+        option.textContent = src.source;
+        select.appendChild(option);
+      });
+      // 전역 변수에 저장해서 테이블에서도 사용
+      window.availableSources = sources.map(s => s.source);
+    })
+    .catch(err => {
+      console.error('출처 목록 로드 실패:', err);
+    });
+}
+
+// 사용자 목록 로드
+function loadUserList() {
+  fetch('/api/users')
+    .then(res => res.json())
+    .then(users => {
+      const tbody = document.getElementById('userListTable');
+      tbody.innerHTML = '';
+      
+      if (users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="border px-4 py-3 text-center text-gray-500">등록된 사용자가 없습니다.</td></tr>';
+        return;
+      }
+
+      users.forEach(user => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-50';
+        
+        // 출처 드롭다운 생성
+        let sourceOptions = '<option value="">출처 선택</option>';
+        if (window.availableSources) {
+          window.availableSources.forEach(src => {
+            const selected = src === user.source ? 'selected' : '';
+            sourceOptions += `<option value="${src}" ${selected}>${src}</option>`;
+          });
+        }
+        
+        tr.innerHTML = `
+          <td class="border px-4 py-2">${user.id}</td>
+          <td class="border px-4 py-2">
+            <input type="text" id="userName-${user.id}" value="${user.user_name}" 
+                   class="w-full px-2 py-1 border rounded focus:border-blue-500">
+          </td>
+          <td class="border px-4 py-2">
+            <select id="userSource-${user.id}" class="w-full px-2 py-1 border rounded focus:border-blue-500">
+              ${sourceOptions}
+            </select>
+          </td>
+          <td class="border px-4 py-2 text-center space-x-2">
+            <button onclick="updateUser(${user.id})" 
+                    class="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 text-xs">
+              수정
+            </button>
+            <button onclick="deleteUser(${user.id})" 
+                    class="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-xs">
+              삭제
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(err => {
+      console.error('사용자 목록 로드 실패:', err);
+      alert('사용자 목록을 불러오는데 실패했습니다.');
+    });
+}
+
+// 사용자 추가
+function addUser() {
+  const userName = document.getElementById('newUserName').value.trim();
+  const source = document.getElementById('newUserSource').value.trim();
+
+  if (!userName || !source) {
+    alert('사용자명과 출처를 모두 입력하세요.');
+    return;
+  }
+
+  fetch('/api/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_name: userName, source: source })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.ok) {
+        alert('사용자가 추가되었습니다.');
+        document.getElementById('newUserName').value = '';
+        document.getElementById('newUserSource').value = '';
+        loadUserList();
+      } else {
+        alert(data.error || '추가 실패');
+      }
+    })
+    .catch(err => {
+      console.error('사용자 추가 실패:', err);
+      alert('사용자 추가에 실패했습니다.');
+    });
+}
+
+// 사용자 수정
+function updateUser(userId) {
+  const userName = document.getElementById(`userName-${userId}`).value.trim();
+  const source = document.getElementById(`userSource-${userId}`).value.trim();
+
+  if (!userName || !source) {
+    alert('사용자명과 출처를 모두 입력하세요.');
+    return;
+  }
+
+  fetch(`/api/users/${userId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_name: userName, source: source })
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.ok) {
+        alert('수정되었습니다.');
+        loadUserList();
+      } else {
+        alert(data.error || '수정 실패');
+      }
+    })
+    .catch(err => {
+      console.error('사용자 수정 실패:', err);
+      alert('사용자 수정에 실패했습니다.');
+    });
+}
+
+// 사용자 삭제
+function deleteUser(userId) {
+  if (!confirm('정말 삭제하시겠습니까?')) return;
+
+  fetch(`/api/users/${userId}`, { method: 'DELETE' })
+    .then(res => res.json())
+    .then(data => {
+      if (data.ok) {
+        alert('삭제되었습니다.');
+        loadUserList();
+      } else {
+        alert(data.error || '삭제 실패');
+      }
+    })
+    .catch(err => {
+      console.error('사용자 삭제 실패:', err);
+      alert('사용자 삭제에 실패했습니다.');
+    });
+}
+</script>
+
 <script>
 // Debug helper (console only)
 function debugLog(msg){
