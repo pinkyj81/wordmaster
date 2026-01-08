@@ -25,23 +25,26 @@
 <!-- 단어 목록 테이블 -->
 <div id="wordListContainer" class="hidden">
   <div class="flex justify-between items-center mb-4">
-    <h3 class="text-xl font-semibold text-gray-700">단어 목록</h3>
+    <div class="flex items-center gap-4">
+      <h3 class="text-xl font-semibold text-gray-700">단어 목록</h3>
+      <button onclick="addNewWord()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition text-sm">
+        + 단어 추가
+      </button>
+    </div>
     <span id="wordCount" class="text-sm text-gray-600"></span>
   </div>
 
   <div class="overflow-x-auto">
-    <table class="w-full text-sm border-collapse bg-white shadow-sm rounded-lg">
+    <table id="wordTable" class="text-sm border-collapse bg-white shadow-sm rounded-lg excel-table">
       <thead>
         <tr class="bg-gradient-to-r from-purple-100 to-indigo-100">
-          <th class="border px-4 py-3 text-left font-semibold text-gray-700 w-12">
-            <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
-          </th>
-          <th class="border px-4 py-3 text-left font-semibold text-gray-700 w-16">ID</th>
-          <th class="border px-4 py-3 text-left font-semibold text-gray-700 w-48">단어</th>
-          <th class="border px-4 py-3 text-left font-semibold text-gray-700">뜻</th>
-          <th class="border px-4 py-3 text-left font-semibold text-gray-700">예문</th>
-          <th class="border px-4 py-3 text-center font-semibold text-gray-700 w-24">암기</th>
-          <th class="border px-4 py-3 text-center font-semibold text-gray-700 w-32">작업</th>
+          <th class="border px-2 py-2 text-center font-semibold text-gray-700" style="width: 60px;">암기</th>
+          <th class="border px-2 py-2 text-left font-semibold text-gray-700" style="width: 60px;">ID</th>
+          <th class="border px-2 py-2 text-left font-semibold text-gray-700" style="width: 150px;">단어</th>
+          <th class="border px-2 py-2 text-left font-semibold text-gray-700" style="width: 200px;">뜻</th>
+          <th class="border px-2 py-2 text-left font-semibold text-gray-700" style="width: 300px;">예문</th>
+          <th class="border px-2 py-2 text-left font-semibold text-gray-700" style="width: 300px;">한국어 예문</th>
+          <th class="border px-2 py-2 text-center font-semibold text-gray-700" style="width: 70px;">삭제</th>
         </tr>
       </thead>
       <tbody id="wordListTable">
@@ -50,15 +53,68 @@
     </table>
   </div>
 
+  <style>
+    .excel-table {
+      table-layout: fixed;
+      width: 100%;
+      user-select: none;
+    }
+    .excel-table td {
+      padding: 0 !important;
+      vertical-align: top;
+      overflow: hidden;
+    }
+    .excel-cell {
+      padding: 8px;
+      min-height: 36px;
+      max-height: 150px;
+      cursor: text;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      word-break: break-word;
+      overflow-y: auto;
+      overflow-x: hidden;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .excel-cell:hover {
+      background-color: #f3f4f6;
+    }
+    .excel-cell:focus {
+      outline: 2px solid #3b82f6;
+      outline-offset: -2px;
+      background-color: white;
+    }
+    .excel-cell[contenteditable="true"] {
+      background-color: white;
+    }
+    .excel-cell.selected {
+      background-color: #dbeafe !important;
+      outline: 2px solid #3b82f6;
+      outline-offset: -2px;
+    }
+    /* 예문 칸 스타일 */
+    .example-cell {
+      min-height: 50px;
+      max-height: 200px;
+    }
+  </style>
+
   <div class="mt-4 flex justify-end">
-    <button onclick="deleteSelectedWords()" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition">
-      선택 삭제
+    <button onclick="updateAllWords()" class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600 transition font-medium">
+      전체 수정
     </button>
   </div>
 </div>
 
 <script>
 let currentTextId = null;
+let originalWords = {}; // 원본 데이터 저장
+let selectedCells = []; // 선택된 셀들
+let isSelecting = false; // 선택 중인지 여부
+let selectionStart = null; // 선택 시작 셀
+let newWordCounter = 0; // 새 단어 임시 ID 카운터
+let autoScrollInterval = null; // 자동 스크롤 인터벌
 
 // 출처별 텍스트 목록 로드
 function loadTitlesBySource() {
@@ -66,13 +122,28 @@ function loadTitlesBySource() {
   const textSelector = document.getElementById('textSelector');
   textSelector.innerHTML = '<option value="">제목을 선택하세요</option>';
   
-  document.getElementById('wordListContainer').classList.add('hidden');
+  const wordListContainer = document.getElementById('wordListContainer');
+  if (wordListContainer) {
+    wordListContainer.classList.add('hidden');
+  }
   
   if (!source) return;
 
+  console.log('Loading titles for source:', source);
+
   fetch(`/get_titles_by_source/${encodeURIComponent(source)}`)
-    .then(res => res.json())
+    .then(res => {
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+      return res.json();
+    })
     .then(titles => {
+      console.log('Titles received:', titles);
+      if (titles.length === 0) {
+        textSelector.innerHTML = '<option value="">해당 출처에 텍스트가 없습니다</option>';
+        return;
+      }
       titles.forEach(t => {
         const option = document.createElement('option');
         option.value = t.id;
@@ -82,7 +153,7 @@ function loadTitlesBySource() {
     })
     .catch(err => {
       console.error('텍스트 목록 로드 실패:', err);
-      alert('텍스트 목록을 불러오는데 실패했습니다.');
+      alert('텍스트 목록을 불러오는데 실패했습니다: ' + err.message);
     });
 }
 
@@ -96,6 +167,7 @@ function loadWordsByText() {
   }
 
   currentTextId = textId;
+  originalWords = {}; // 원본 데이터 초기화
 
   fetch(`/get_words_by_text/${textId}`)
     .then(res => res.json())
@@ -112,6 +184,15 @@ function loadWordsByText() {
       }
 
       words.forEach(word => {
+        // 원본 데이터 저장
+        originalWords[word.id] = {
+          word: word.word,
+          meaning: word.meaning,
+          example: word.example || '',
+          exam_korean: word.exam_korean || '',
+          is_learned: word.is_learned ? 1 : 0
+        };
+
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-gray-50';
         tr.dataset.wordId = word.id;
@@ -119,33 +200,57 @@ function loadWordsByText() {
         const isLearned = word.is_learned ? 'checked' : '';
         
         tr.innerHTML = `
-          <td class="border px-4 py-2 text-center">
-            <input type="checkbox" class="word-checkbox" data-word-id="${word.id}">
+          <td class="border text-center">
+            <input type="checkbox" id="learned-${word.id}" ${isLearned} class="m-2">
           </td>
-          <td class="border px-4 py-2">${word.id}</td>
-          <td class="border px-4 py-2">
-            <input type="text" id="word-${word.id}" value="${word.word}" 
-                   class="w-full px-2 py-1 border rounded focus:border-blue-500">
+          <td class="border text-center px-2 py-1">${word.id}</td>
+          <td class="border">
+            <div id="word-${word.id}" 
+                 class="excel-cell" 
+                 contenteditable="true"
+                 data-field="word"
+                 data-word-id="${word.id}"
+                 onmousedown="startCellSelection(event, this)"
+                 onmousemove="updateCellSelection(event, this)"
+                 onmouseup="endCellSelection()"
+                 onpaste="handleMultiCellPaste(event)">${word.word}</div>
           </td>
-          <td class="border px-4 py-2">
-            <input type="text" id="meaning-${word.id}" value="${word.meaning}" 
-                   class="w-full px-2 py-1 border rounded focus:border-blue-500">
+          <td class="border">
+            <div id="meaning-${word.id}" 
+                 class="excel-cell" 
+                 contenteditable="true"
+                 data-field="meaning"
+                 data-word-id="${word.id}"
+                 onmousedown="startCellSelection(event, this)"
+                 onmousemove="updateCellSelection(event, this)"
+                 onmouseup="endCellSelection()"
+                 onpaste="handleMultiCellPaste(event)">${word.meaning}</div>
           </td>
-          <td class="border px-4 py-2">
-            <textarea id="example-${word.id}" 
-                      class="w-full px-2 py-1 border rounded focus:border-blue-500 resize-none" 
-                      rows="2">${word.example || ''}</textarea>
+          <td class="border">
+            <div id="example-${word.id}" 
+                 class="excel-cell example-cell" 
+                 contenteditable="true"
+                 data-field="example"
+                 data-word-id="${word.id}"
+                 onmousedown="startCellSelection(event, this)"
+                 onmousemove="updateCellSelection(event, this)"
+                 onmouseup="endCellSelection()"
+                 onpaste="handleMultiCellPaste(event)">${word.example || ''}</div>
           </td>
-          <td class="border px-4 py-2 text-center">
-            <input type="checkbox" ${isLearned} onchange="toggleLearned(${word.id}, this)">
+          <td class="border">
+            <div id="exam-korean-${word.id}" 
+                 class="excel-cell example-cell" 
+                 contenteditable="true"
+                 data-field="exam_korean"
+                 data-word-id="${word.id}"
+                 onmousedown="startCellSelection(event, this)"
+                 onmousemove="updateCellSelection(event, this)"
+                 onmouseup="endCellSelection()"
+                 onpaste="handleMultiCellPaste(event)">${word.exam_korean || ''}</div>
           </td>
-          <td class="border px-4 py-2 text-center space-x-1">
-            <button onclick="updateWord(${word.id})" 
-                    class="bg-green-500 text-white px-2 py-1 rounded hover:bg-green-600 text-xs">
-              수정
-            </button>
+          <td class="border text-center">
             <button onclick="deleteWord(${word.id})" 
-                    class="bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600 text-xs">
+                    class="bg-red-500 text-white px-2 py-1 rounded hover:bg-red-600 text-xs m-1">
               삭제
             </button>
           </td>
@@ -163,6 +268,375 @@ function loadWordsByText() {
 function toggleSelectAll(checkbox) {
   const checkboxes = document.querySelectorAll('.word-checkbox');
   checkboxes.forEach(cb => cb.checked = checkbox.checked);
+}
+
+// 새 단어 추가
+function addNewWord() {
+  if (!currentTextId) {
+    alert('텍스트를 먼저 선택하세요.');
+    return;
+  }
+
+  newWordCounter++;
+  const tempId = `new_${newWordCounter}`;
+  const tbody = document.getElementById('wordListTable');
+  
+  const tr = document.createElement('tr');
+  tr.className = 'hover:bg-gray-50 bg-yellow-50';
+  tr.dataset.wordId = tempId;
+  tr.dataset.isNew = 'true';
+  
+  tr.innerHTML = `
+    <td class="border text-center">
+      <input type="checkbox" id="learned-${tempId}" class="m-2">
+    </td>
+    <td class="border text-center px-2 py-1 text-gray-400">NEW</td>
+    <td class="border">
+      <div id="word-${tempId}" 
+           class="excel-cell" 
+           contenteditable="true"
+           data-field="word"
+           data-word-id="${tempId}"
+           onmousedown="startCellSelection(event, this)"
+           onmousemove="updateCellSelection(event, this)"
+           onmouseup="endCellSelection()"
+           onpaste="handleMultiCellPaste(event)"></div>
+    </td>
+    <td class="border">
+      <div id="meaning-${tempId}" 
+           class="excel-cell" 
+           contenteditable="true"
+           data-field="meaning"
+           data-word-id="${tempId}"
+           onmousedown="startCellSelection(event, this)"
+           onmousemove="updateCellSelection(event, this)"
+           onmouseup="endCellSelection()"
+           onpaste="handleMultiCellPaste(event)"></div>
+    </td>
+    <td class="border">
+      <div id="example-${tempId}" 
+           class="excel-cell example-cell" 
+           contenteditable="true"
+           data-field="example"
+           data-word-id="${tempId}"
+           onmousedown="startCellSelection(event, this)"
+           onmousemove="updateCellSelection(event, this)"
+           onmouseup="endCellSelection()"
+           onpaste="handleMultiCellPaste(event)"></div>
+    </td>
+    <td class="border">
+      <div id="exam-korean-${tempId}" 
+           class="excel-cell example-cell" 
+           contenteditable="true"
+           data-field="exam_korean"
+           data-word-id="${tempId}"
+           onmousedown="startCellSelection(event, this)"
+           onmousemove="updateCellSelection(event, this)"
+           onmouseup="endCellSelection()"
+           onpaste="handleMultiCellPaste(event)"></div>
+    </td>
+    <td class="border text-center">
+      <button onclick="removeNewWord('${tempId}')" 
+              class="bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600 text-xs m-1">
+        취소
+      </button>
+    </td>
+  `;
+  
+  tbody.insertBefore(tr, tbody.firstChild);
+  
+  // 첫 번째 셀(단어)에 포커스
+  document.getElementById(`word-${tempId}`).focus();
+  
+  // 단어 개수 업데이트
+  updateWordCount();
+}
+
+// 새 단어 행 제거
+function removeNewWord(tempId) {
+  const row = document.querySelector(`tr[data-word-id="${tempId}"]`);
+  if (row) {
+    row.remove();
+    updateWordCount();
+  }
+}
+
+// 단어 개수 업데이트
+function updateWordCount() {
+  const rows = document.querySelectorAll('#wordListTable tr[data-word-id]');
+  document.getElementById('wordCount').textContent = `총 ${rows.length}개`;
+}
+
+// 셀 선택 시작
+function startCellSelection(event, cell) {
+  if (event.ctrlKey || event.metaKey) return; // Ctrl 키로 텍스트 선택은 허용
+  
+  isSelecting = true;
+  selectionStart = cell;
+  clearCellSelection();
+  cell.classList.add('selected');
+  selectedCells = [cell];
+}
+
+// 셀 선택 업데이트 (드래그)
+function updateCellSelection(event, cell) {
+  if (!isSelecting || !selectionStart) return;
+  
+  const startField = selectionStart.dataset.field;
+  const currentField = cell.dataset.field;
+  
+  // 같은 필드(열)만 선택 가능
+  if (startField !== currentField) return;
+  
+  // 자동 스크롤 처리
+  handleAutoScroll(event);
+  
+  // 시작 셀과 현재 셀 사이의 모든 셀 선택
+  const allCells = Array.from(document.querySelectorAll(`[data-field="${startField}"]`));
+  const startIndex = allCells.indexOf(selectionStart);
+  const currentIndex = allCells.indexOf(cell);
+  
+  const minIndex = Math.min(startIndex, currentIndex);
+  const maxIndex = Math.max(startIndex, currentIndex);
+  
+  clearCellSelection();
+  selectedCells = [];
+  
+  for (let i = minIndex; i <= maxIndex; i++) {
+    allCells[i].classList.add('selected');
+    selectedCells.push(allCells[i]);
+  }
+}
+
+// 자동 스크롤 처리
+function handleAutoScroll(event) {
+  const scrollThreshold = 100; // 화면 끝에서 100px 이내면 스크롤
+  const scrollSpeed = 10; // 스크롤 속도
+  
+  const mouseY = event.clientY;
+  const windowHeight = window.innerHeight;
+  
+  // 기존 인터벌 제거
+  if (autoScrollInterval) {
+    clearInterval(autoScrollInterval);
+    autoScrollInterval = null;
+  }
+  
+  // 하단 근처에서 아래로 스크롤
+  if (mouseY > windowHeight - scrollThreshold) {
+    autoScrollInterval = setInterval(() => {
+      window.scrollBy(0, scrollSpeed);
+    }, 16); // 약 60fps
+  }
+  // 상단 근처에서 위로 스크롤
+  else if (mouseY < scrollThreshold) {
+    autoScrollInterval = setInterval(() => {
+      window.scrollBy(0, -scrollSpeed);
+    }, 16);
+  }
+}
+
+// 셀 선택 종료
+function endCellSelection() {
+  isSelecting = false;
+  
+  // 자동 스크롤 중지
+  if (autoScrollInterval) {
+    clearInterval(autoScrollInterval);
+    autoScrollInterval = null;
+  }
+}
+
+// 선택 해제
+function clearCellSelection() {
+  document.querySelectorAll('.excel-cell.selected').forEach(cell => {
+    cell.classList.remove('selected');
+  });
+  selectedCells = [];
+}
+
+// 문서 전체에서 마우스 업 이벤트 감지
+document.addEventListener('mouseup', endCellSelection);
+
+// 다중 셀 붙여넣기
+function handleMultiCellPaste(event) {
+  event.preventDefault();
+  
+  const pastedData = (event.clipboardData || window.clipboardData).getData('text');
+  const lines = pastedData.split('\n').filter(line => line.trim() !== '');
+  
+  if (selectedCells.length === 0) {
+    // 선택된 셀이 없으면 현재 셀에만 붙여넣기
+    const currentCell = event.target;
+    const parts = lines[0].split('\t');
+    
+    if (parts.length === 1) {
+      // 단일 값
+      currentCell.textContent = parts[0].trim();
+    } else {
+      // 탭으로 구분된 값 (단어, 뜻, 예문)
+      const wordId = currentCell.dataset.wordId;
+      const field = currentCell.dataset.field;
+      
+      if (field === 'word' && parts.length >= 1) {
+        document.getElementById(`word-${wordId}`).textContent = parts[0].trim();
+      }
+      if (field === 'word' && parts.length >= 2) {
+        document.getElementById(`meaning-${wordId}`).textContent = parts[1].trim();
+      }
+      if (field === 'word' && parts.length >= 3) {
+        document.getElementById(`example-${wordId}`).textContent = parts[2].trim();
+      }
+      
+      if (field === 'meaning' && parts.length >= 1) {
+        document.getElementById(`meaning-${wordId}`).textContent = parts[0].trim();
+      }
+      if (field === 'meaning' && parts.length >= 2) {
+        document.getElementById(`example-${wordId}`).textContent = parts[1].trim();
+      }
+      
+      if (field === 'example' && parts.length >= 1) {
+        document.getElementById(`example-${wordId}`).textContent = parts[0].trim();
+      }
+    }
+  } else {
+    // 선택된 셀이 있으면 각 셀에 데이터 분배
+    lines.forEach((line, index) => {
+      if (index < selectedCells.length) {
+        const cell = selectedCells[index];
+        const parts = line.split('\t');
+        cell.textContent = parts[0].trim();
+      }
+    });
+    
+    clearCellSelection();
+  }
+}
+
+// 엑셀 스타일 붙여넣기 (탭으로 구분된 데이터 처리) - 이전 버전 (호환용)
+function handleExcelPaste(event, wordId) {
+  handleMultiCellPaste(event);
+}
+
+// 전체 단어 수정 (변경된 것만)
+function updateAllWords() {
+  const rows = document.querySelectorAll('#wordListTable tr[data-word-id]');
+  
+  if (rows.length === 0) {
+    alert('수정할 단어가 없습니다.');
+    return;
+  }
+
+  const updateWords = [];
+  const newWords = [];
+  let hasError = false;
+
+  rows.forEach(row => {
+    const wordId = row.dataset.wordId;
+    const isNew = row.dataset.isNew === 'true';
+    const word = document.getElementById(`word-${wordId}`).textContent.trim();
+    const meaning = document.getElementById(`meaning-${wordId}`).textContent.trim();
+    const example = document.getElementById(`example-${wordId}`).textContent.trim();
+    const examKorean = document.getElementById(`exam-korean-${wordId}`).textContent.trim();
+    const isLearned = document.getElementById(`learned-${wordId}`).checked ? 1 : 0;
+
+    if (!word || !meaning) {
+      alert(`${isNew ? '새 단어' : 'ID ' + wordId}: 단어와 뜻을 모두 입력하세요.`);
+      hasError = true;
+      return;
+    }
+
+    if (isNew) {
+      // 새 단어
+      newWords.push({
+        word: word,
+        meaning: meaning,
+        example: example,
+        exam_korean: examKorean,
+        is_learned: isLearned
+      });
+    } else {
+      // 기존 단어 - 원본 데이터와 비교하여 변경된 경우만 추가
+      const original = originalWords[wordId];
+      if (original && (
+        original.word !== word ||
+        original.meaning !== meaning ||
+        original.example !== example ||
+        original.exam_korean !== examKorean ||
+        original.is_learned !== isLearned
+      )) {
+        updateWords.push({
+          id: wordId,
+          word: word,
+          meaning: meaning,
+          example: example,
+          exam_korean: examKorean,
+          is_learned: isLearned
+        });
+      }
+    }
+  });
+
+  if (hasError) return;
+
+  if (updateWords.length === 0 && newWords.length === 0) {
+    alert('변경되거나 추가된 단어가 없습니다.');
+    return;
+  }
+
+  const message = [];
+  if (newWords.length > 0) message.push(`${newWords.length}개 추가`);
+  if (updateWords.length > 0) message.push(`${updateWords.length}개 수정`);
+  
+  if (!confirm(`${message.join(', ')}하시겠습니까?`)) return;
+
+  // 순차적으로 처리: 먼저 새 단어 추가, 그 다음 기존 단어 수정
+  let promise = Promise.resolve();
+
+  if (newWords.length > 0) {
+    promise = promise.then(() => 
+      fetch('/upload_words', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          text_id: currentTextId,
+          words: newWords 
+        })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          throw new Error('새 단어 추가 실패: ' + data.error);
+        }
+      })
+    );
+  }
+
+  if (updateWords.length > 0) {
+    promise = promise.then(() =>
+      fetch('/update_words', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ words: updateWords })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          throw new Error('단어 수정 실패: ' + data.error);
+        }
+      })
+    );
+  }
+
+  promise
+    .then(() => {
+      alert(`완료되었습니다. (${message.join(', ')})`);
+      loadWordsByText();
+    })
+    .catch(err => {
+      console.error('작업 실패:', err);
+      alert(err.message || '작업에 실패했습니다.');
+    });
 }
 
 // 암기 상태 토글
@@ -186,37 +660,6 @@ function toggleLearned(wordId, checkbox) {
       console.error('암기 상태 업데이트 실패:', err);
       alert('암기 상태 업데이트에 실패했습니다.');
       checkbox.checked = !checkbox.checked;
-    });
-}
-
-// 단어 수정
-function updateWord(wordId) {
-  const word = document.getElementById(`word-${wordId}`).value.trim();
-  const meaning = document.getElementById(`meaning-${wordId}`).value.trim();
-  const example = document.getElementById(`example-${wordId}`).value.trim();
-
-  if (!word || !meaning) {
-    alert('단어와 뜻을 모두 입력하세요.');
-    return;
-  }
-
-  fetch('/update_word', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
-      id: wordId, 
-      word: word, 
-      meaning: meaning,
-      example: example
-    })
-  })
-    .then(res => res.json())
-    .then(data => {
-      alert(data.message || '수정되었습니다.');
-    })
-    .catch(err => {
-      console.error('단어 수정 실패:', err);
-      alert('단어 수정에 실패했습니다.');
     });
 }
 

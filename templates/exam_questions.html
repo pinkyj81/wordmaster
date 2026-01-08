@@ -1,0 +1,785 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="text-2xl font-semibold mb-6 text-gray-800">문제 풀기</h2>
+
+<!-- 카테고리 선택 -->
+<div class="mb-6">
+  <label class="block mb-2 text-gray-700 font-medium">카테고리 선택</label>
+  <select id="categorySelector" class="border rounded px-3 py-2 w-full max-w-md">
+    <option value="">카테고리를 선택하세요</option>
+    {% for category in categories %}
+      <option value="{{ category }}">{{ category }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<!-- 시작 버튼 -->
+<div class="mb-6 flex gap-3">
+  <button onclick="startExam()" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition font-semibold">
+    문제 풀기 시작
+  </button>
+  <button onclick="openQuestionManager()" class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-semibold">
+    문제 관리
+  </button>
+</div>
+
+<!-- 문제 풀기 모달 -->
+<div id="examModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-2xl w-[900px] max-h-[90vh] overflow-y-auto p-8 relative">
+    <!-- 헤더 -->
+    <div class="flex justify-between items-center mb-6 border-b pb-4">
+      <div>
+        <h2 class="text-2xl font-bold text-gray-800">문제 풀기</h2>
+        <p class="text-sm text-gray-500 mt-1">문제: <span id="currentQuestionNum">1</span> / <span id="totalQuestions">0</span></p>
+      </div>
+      <button onclick="closeExamModal()" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+    </div>
+
+    <!-- 진행률 바 -->
+    <div class="mb-6">
+      <div class="w-full bg-gray-200 rounded-full h-2">
+        <div id="progressBar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <!-- 문제 영역 -->
+    <div id="questionContainer" class="mb-6">
+      <div class="bg-blue-50 border-l-4 border-blue-600 p-6 mb-6 rounded">
+        <p class="text-sm text-blue-800 font-semibold mb-2">문제 <span id="questionNumber"></span></p>
+        <p id="questionText" class="text-lg text-gray-800 font-medium leading-relaxed whitespace-pre-wrap"></p>
+      </div>
+
+      <!-- 보기 -->
+      <div id="choicesContainer" class="space-y-3">
+        <!-- 동적으로 생성됩니다 -->
+      </div>
+    </div>
+
+    <!-- 다음/제출 버튼 -->
+    <div class="flex justify-between items-center mt-8 pt-4 border-t">
+      <button onclick="prevQuestion()" id="prevBtn" class="bg-gray-500 text-white px-6 py-2 rounded hover:bg-gray-600 transition" disabled>
+        이전
+      </button>
+      <button onclick="nextQuestion()" id="nextBtn" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 transition">
+        다음
+      </button>
+      <button onclick="submitExam()" id="submitBtn" class="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition hidden">
+        제출
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 결과 모달 -->
+<div id="resultModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-2xl w-[700px] p-8 relative">
+    <div class="text-center">
+      <div class="mb-6">
+        <div class="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg class="w-10 h-10 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+          </svg>
+        </div>
+        <h2 class="text-3xl font-bold text-gray-800 mb-2">시험 완료!</h2>
+        <p class="text-gray-600">수고하셨습니다</p>
+      </div>
+
+      <div class="bg-blue-50 rounded-lg p-6 mb-6">
+        <div class="grid grid-cols-3 gap-4 text-center">
+          <div>
+            <p class="text-sm text-gray-600 mb-1">총 문제</p>
+            <p class="text-2xl font-bold text-blue-600"><span id="resultTotal">0</span>개</p>
+          </div>
+          <div>
+            <p class="text-sm text-gray-600 mb-1">정답</p>
+            <p class="text-2xl font-bold text-green-600"><span id="resultCorrect">0</span>개</p>
+          </div>
+          <div>
+            <p class="text-sm text-gray-600 mb-1">점수</p>
+            <p class="text-2xl font-bold text-purple-600"><span id="resultScore">0</span>점</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 오답 목록 -->
+      <div id="wrongAnswersContainer" class="text-left mb-6 max-h-60 overflow-y-auto">
+        <!-- 동적으로 생성됩니다 -->
+      </div>
+
+      <div class="flex justify-center space-x-3">
+        <button onclick="closeResultModal()" class="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 transition font-semibold">
+          확인
+        </button>
+        <button onclick="retryExam()" class="bg-gray-500 text-white px-8 py-3 rounded-lg hover:bg-gray-600 transition font-semibold">
+          다시 풀기
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 문제 관리 모달 -->
+<div id="managerModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-2xl w-[1000px] max-h-[90vh] overflow-y-auto p-8 relative">
+    <div class="flex justify-between items-center mb-6 border-b pb-4">
+      <h2 class="text-2xl font-bold text-gray-800">문제 관리</h2>
+      <button onclick="closeQuestionManager()" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+    </div>
+
+    <!-- 카테고리 필터 & 추가 버튼 -->
+    <div class="flex justify-between items-center mb-4">
+      <div class="flex gap-3 items-center">
+        <label class="text-sm font-medium text-gray-700">카테고리:</label>
+        <select id="managerCategorySelector" onchange="loadQuestionList()" class="border rounded px-3 py-2">
+          <option value="">전체</option>
+          {% for category in categories %}
+            <option value="{{ category }}">{{ category }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="openBulkPasteModal()" class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition font-semibold">
+          📋 엑셀 붙여넣기
+        </button>
+        <button onclick="openAddQuestionModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition font-semibold">
+          + 문제 추가
+        </button>
+      </div>
+    </div>
+
+    <!-- 문제 목록 테이블 -->
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm border-collapse bg-white shadow-sm rounded-lg">
+        <thead>
+          <tr class="bg-gradient-to-r from-purple-100 to-indigo-100">
+            <th class="border px-3 py-2 text-center font-semibold text-gray-700" style="width: 60px;">번호</th>
+            <th class="border px-3 py-2 text-left font-semibold text-gray-700" style="width: 120px;">카테고리</th>
+            <th class="border px-3 py-2 text-left font-semibold text-gray-700">문제</th>
+            <th class="border px-3 py-2 text-center font-semibold text-gray-700" style="width: 120px;">작업</th>
+          </tr>
+        </thead>
+        <tbody id="questionListTable">
+          <!-- 동적으로 채워집니다 -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- 문제 추가/수정 모달 -->
+<div id="questionFormModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-2xl w-[700px] max-h-[90vh] overflow-y-auto p-8 relative">
+    <div class="flex justify-between items-center mb-6 border-b pb-4">
+      <h2 id="questionFormTitle" class="text-2xl font-bold text-gray-800">문제 추가</h2>
+      <button onclick="closeQuestionFormModal()" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+    </div>
+
+    <form id="questionForm" onsubmit="event.preventDefault(); saveQuestion();">
+      <input type="hidden" id="questionId">
+      
+      <div class="grid grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">카테고리</label>
+          <input id="formCategory" type="text" class="w-full border rounded px-3 py-2" placeholder="예: TOEFL" required>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1">번호</label>
+          <input id="formNumber" type="number" class="w-full border rounded px-3 py-2" placeholder="1">
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-sm font-semibold text-gray-700 mb-1">문제 *</label>
+        <textarea id="formQuestion" rows="4" class="w-full border rounded px-3 py-2" placeholder="문제를 입력하세요" required></textarea>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-sm font-semibold text-gray-700 mb-1">보기 A</label>
+        <input id="formChoiceA" type="text" class="w-full border rounded px-3 py-2" placeholder="보기 A">
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-sm font-semibold text-gray-700 mb-1">보기 B</label>
+        <input id="formChoiceB" type="text" class="w-full border rounded px-3 py-2" placeholder="보기 B">
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-sm font-semibold text-gray-700 mb-1">보기 C</label>
+        <input id="formChoiceC" type="text" class="w-full border rounded px-3 py-2" placeholder="보기 C">
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-sm font-semibold text-gray-700 mb-1">보기 D</label>
+        <input id="formChoiceD" type="text" class="w-full border rounded px-3 py-2" placeholder="보기 D">
+      </div>
+
+      <div class="mb-6">
+        <label class="block text-sm font-semibold text-gray-700 mb-1">정답 *</label>
+        <select id="formAnswer" class="w-full border rounded px-3 py-2" required>
+          <option value="">정답 선택</option>
+          <option value="A">A</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+          <option value="D">D</option>
+        </select>
+      </div>
+
+      <div class="flex justify-end space-x-3">
+        <button type="button" onclick="closeQuestionFormModal()" class="px-6 py-2 bg-gray-300 rounded hover:bg-gray-400">취소</button>
+        <button type="submit" class="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">저장</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 엑셀 데이터 붙여넣기 모달 -->
+<div id="bulkPasteModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-2xl w-[900px] max-h-[90vh] overflow-y-auto p-8 relative">
+    <div class="flex justify-between items-center mb-6 border-b pb-4">
+      <div>
+        <h2 class="text-2xl font-bold text-gray-800">엑셀 데이터 붙여넣기</h2>
+        <p class="text-sm text-gray-500 mt-1">엑셀에서 복사한 데이터를 아래에 붙여넣으세요</p>
+      </div>
+      <button onclick="closeBulkPasteModal()" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+    </div>
+
+    <!-- 안내 문구 -->
+    <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4">
+      <p class="text-sm text-blue-800 font-semibold mb-2">📋 데이터 형식 안내</p>
+      <p class="text-sm text-gray-700">엑셀에서 다음 순서로 데이터를 복사하세요:</p>
+      <p class="text-sm text-gray-700 font-mono mt-1">카테고리 &nbsp;&nbsp; 번호 &nbsp;&nbsp; 문제 &nbsp;&nbsp; 보기A &nbsp;&nbsp; 보기B &nbsp;&nbsp; 보기C &nbsp;&nbsp; 보기D &nbsp;&nbsp; 정답</p>
+      <p class="text-sm text-gray-500 mt-2">※ 탭(Tab)으로 구분된 데이터를 붙여넣으면 자동으로 파싱됩니다.</p>
+    </div>
+
+    <!-- 붙여넣기 영역 -->
+    <div class="mb-4">
+      <label class="block text-sm font-semibold text-gray-700 mb-2">엑셀 데이터 붙여넣기</label>
+      <textarea id="bulkPasteArea" rows="10" class="w-full border rounded-lg p-3 font-mono text-sm" 
+        placeholder="엑셀에서 복사한 데이터를 여기에 붙여넣으세요...&#10;&#10;예시:&#10;TOEFL	1	What is the main idea?	option1	option2	option3	option4	A&#10;TOEFL	2	Choose the correct answer	choice1	choice2	choice3	choice4	B"></textarea>
+    </div>
+
+    <!-- 미리보기 -->
+    <div class="mb-4">
+      <button onclick="previewBulkData()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+        미리보기
+      </button>
+    </div>
+
+    <div id="bulkPreviewContainer" class="mb-4 hidden">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2">미리보기 (<span id="previewCount">0</span>개 문제)</h3>
+      <div class="max-h-64 overflow-y-auto border rounded-lg">
+        <table class="w-full text-xs">
+          <thead class="bg-gray-100 sticky top-0">
+            <tr>
+              <th class="border px-2 py-1">카테고리</th>
+              <th class="border px-2 py-1">번호</th>
+              <th class="border px-2 py-1">문제</th>
+              <th class="border px-2 py-1">A</th>
+              <th class="border px-2 py-1">B</th>
+              <th class="border px-2 py-1">C</th>
+              <th class="border px-2 py-1">D</th>
+              <th class="border px-2 py-1">정답</th>
+            </tr>
+          </thead>
+          <tbody id="bulkPreviewTable">
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="flex justify-end space-x-3">
+      <button onclick="closeBulkPasteModal()" class="px-6 py-2 bg-gray-300 rounded hover:bg-gray-400">취소</button>
+      <button onclick="submitBulkQuestions()" class="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700">일괄 저장</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let questions = [];
+let currentQuestionIndex = 0;
+let userAnswers = [];
+let selectedCategory = '';
+let bulkQuestionsData = [];
+
+// 엑셀 붙여넣기 모달 열기
+function openBulkPasteModal() {
+  document.getElementById('bulkPasteModal').classList.remove('hidden');
+  document.getElementById('bulkPasteModal').classList.add('flex');
+  document.getElementById('bulkPasteArea').value = '';
+  document.getElementById('bulkPreviewContainer').classList.add('hidden');
+  bulkQuestionsData = [];
+}
+
+function closeBulkPasteModal() {
+  document.getElementById('bulkPasteModal').classList.add('hidden');
+  document.getElementById('bulkPasteModal').classList.remove('flex');
+}
+
+// 엑셀 데이터 미리보기
+function previewBulkData() {
+  const pasteArea = document.getElementById('bulkPasteArea').value.trim();
+  
+  if (!pasteArea) {
+    alert('데이터를 붙여넣어주세요.');
+    return;
+  }
+  
+  // 줄 단위로 분리
+  const lines = pasteArea.split('\n').filter(line => line.trim());
+  bulkQuestionsData = [];
+  
+  lines.forEach((line, index) => {
+    // 탭으로 분리
+    const parts = line.split('\t');
+    
+    if (parts.length >= 3) { // 최소 카테고리, 번호, 문제는 있어야 함
+      const questionData = {
+        category: parts[0]?.trim() || '',
+        number: parts[1]?.trim() || '',
+        question: parts[2]?.trim() || '',
+        choice_a: parts[3]?.trim() || '',
+        choice_b: parts[4]?.trim() || '',
+        choice_c: parts[5]?.trim() || '',
+        choice_d: parts[6]?.trim() || '',
+        answer: parts[7]?.trim().toUpperCase() || ''
+      };
+      
+      bulkQuestionsData.push(questionData);
+    }
+  });
+  
+  // 미리보기 테이블 생성
+  const previewTable = document.getElementById('bulkPreviewTable');
+  previewTable.innerHTML = '';
+  
+  if (bulkQuestionsData.length === 0) {
+    alert('올바른 데이터 형식이 아닙니다.\n탭(Tab)으로 구분된 데이터를 붙여넣어주세요.');
+    return;
+  }
+  
+  bulkQuestionsData.forEach((q, index) => {
+    const tr = document.createElement('tr');
+    tr.className = 'hover:bg-gray-50';
+    tr.innerHTML = `
+      <td class="border px-2 py-1">${q.category}</td>
+      <td class="border px-2 py-1">${q.number}</td>
+      <td class="border px-2 py-1 max-w-xs truncate" title="${q.question}">${q.question}</td>
+      <td class="border px-2 py-1 max-w-xs truncate" title="${q.choice_a}">${q.choice_a}</td>
+      <td class="border px-2 py-1 max-w-xs truncate" title="${q.choice_b}">${q.choice_b}</td>
+      <td class="border px-2 py-1 max-w-xs truncate" title="${q.choice_c}">${q.choice_c}</td>
+      <td class="border px-2 py-1 max-w-xs truncate" title="${q.choice_d}">${q.choice_d}</td>
+      <td class="border px-2 py-1 font-semibold text-center">${q.answer}</td>
+    `;
+    previewTable.appendChild(tr);
+  });
+  
+  document.getElementById('previewCount').textContent = bulkQuestionsData.length;
+  document.getElementById('bulkPreviewContainer').classList.remove('hidden');
+}
+
+// 일괄 저장
+function submitBulkQuestions() {
+  if (bulkQuestionsData.length === 0) {
+    alert('먼저 미리보기를 확인해주세요.');
+    return;
+  }
+  
+  if (!confirm(`${bulkQuestionsData.length}개의 문제를 저장하시겠습니까?`)) {
+    return;
+  }
+  
+  // API 호출
+  fetch('/api/exam_questions/bulk', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questions: bulkQuestionsData })
+  })
+  .then(res => res.json())
+  .then(result => {
+    if (result.ok) {
+      alert(`${result.count || bulkQuestionsData.length}개의 문제가 저장되었습니다.`);
+      closeBulkPasteModal();
+      loadQuestionList();
+    } else {
+      alert('오류: ' + (result.error || '알 수 없는 오류'));
+    }
+  })
+  .catch(err => {
+    console.error('일괄 저장 실패:', err);
+    alert('문제 저장에 실패했습니다.');
+  });
+}
+
+// 시험 시작
+function startExam() {
+  selectedCategory = document.getElementById('categorySelector').value;
+  
+  if (!selectedCategory) {
+    alert('카테고리를 선택하세요.');
+    return;
+  }
+
+  // 문제 불러오기
+  fetch(`/api/exam_questions?category=${encodeURIComponent(selectedCategory)}`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.length === 0) {
+        alert('선택한 카테고리에 문제가 없습니다.');
+        return;
+      }
+      
+      questions = data;
+      currentQuestionIndex = 0;
+      userAnswers = new Array(questions.length).fill(null);
+      
+      // 모달 표시
+      document.getElementById('examModal').classList.remove('hidden');
+      document.getElementById('examModal').classList.add('flex');
+      
+      // 첫 문제 표시
+      displayQuestion();
+    })
+    .catch(err => {
+      console.error('문제 로드 실패:', err);
+      alert('문제를 불러오는데 실패했습니다.');
+    });
+}
+
+// 문제 표시
+function displayQuestion() {
+  if (questions.length === 0) return;
+  
+  const question = questions[currentQuestionIndex];
+  
+  // 진행률 업데이트
+  const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
+  document.getElementById('progressBar').style.width = progress + '%';
+  
+  // 문제 번호
+  document.getElementById('currentQuestionNum').textContent = currentQuestionIndex + 1;
+  document.getElementById('totalQuestions').textContent = questions.length;
+  document.getElementById('questionNumber').textContent = currentQuestionIndex + 1;
+  
+  // 문제 텍스트
+  document.getElementById('questionText').textContent = question.question;
+  
+  // 보기 생성
+  const choicesContainer = document.getElementById('choicesContainer');
+  choicesContainer.innerHTML = '';
+  
+  const choices = [
+    { label: 'A', text: question.choice_a },
+    { label: 'B', text: question.choice_b },
+    { label: 'C', text: question.choice_c },
+    { label: 'D', text: question.choice_d }
+  ];
+  
+  choices.forEach(choice => {
+    if (choice.text) {
+      const choiceDiv = document.createElement('div');
+      const isSelected = userAnswers[currentQuestionIndex] === choice.label;
+      
+      choiceDiv.className = `border rounded-lg p-4 cursor-pointer transition hover:bg-blue-50 hover:border-blue-400 ${
+        isSelected ? 'bg-blue-100 border-blue-500' : 'bg-white border-gray-300'
+      }`;
+      choiceDiv.onclick = () => selectAnswer(choice.label);
+      
+      choiceDiv.innerHTML = `
+        <div class="flex items-start">
+          <span class="font-bold text-blue-600 mr-3 min-w-[24px]">${choice.label}.</span>
+          <span class="text-gray-800">${choice.text}</span>
+        </div>
+      `;
+      
+      choicesContainer.appendChild(choiceDiv);
+    }
+  });
+  
+  // 버튼 상태 업데이트
+  document.getElementById('prevBtn').disabled = currentQuestionIndex === 0;
+  
+  if (currentQuestionIndex === questions.length - 1) {
+    document.getElementById('nextBtn').classList.add('hidden');
+    document.getElementById('submitBtn').classList.remove('hidden');
+  } else {
+    document.getElementById('nextBtn').classList.remove('hidden');
+    document.getElementById('submitBtn').classList.add('hidden');
+  }
+}
+
+// 답안 선택
+function selectAnswer(answer) {
+  userAnswers[currentQuestionIndex] = answer;
+  displayQuestion(); // 선택 상태 업데이트
+}
+
+// 이전 문제
+function prevQuestion() {
+  if (currentQuestionIndex > 0) {
+    currentQuestionIndex--;
+    displayQuestion();
+  }
+}
+
+// 다음 문제
+function nextQuestion() {
+  if (currentQuestionIndex < questions.length - 1) {
+    currentQuestionIndex++;
+    displayQuestion();
+  }
+}
+
+// 시험 제출
+function submitExam() {
+  // 미응답 문제 확인
+  const unanswered = userAnswers.filter(a => a === null).length;
+  if (unanswered > 0) {
+    if (!confirm(`${unanswered}개 문제에 답하지 않았습니다. 제출하시겠습니까?`)) {
+      return;
+    }
+  }
+  
+  // 채점
+  let correctCount = 0;
+  const wrongAnswers = [];
+  
+  questions.forEach((q, index) => {
+    const userAnswer = userAnswers[index];
+    const correctAnswer = q.answer;
+    
+    if (userAnswer && userAnswer.toUpperCase() === correctAnswer.toUpperCase()) {
+      correctCount++;
+    } else {
+      wrongAnswers.push({
+        number: index + 1,
+        question: q.question,
+        userAnswer: userAnswer || '미응답',
+        correctAnswer: correctAnswer
+      });
+    }
+  });
+  
+  const score = Math.round((correctCount / questions.length) * 100);
+  
+  // 결과 저장 (선택사항)
+  fetch('/api/exam_result', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      category: selectedCategory,
+      total_questions: questions.length,
+      correct_answers: correctCount
+    })
+  });
+  
+  // 결과 표시
+  showResult(questions.length, correctCount, score, wrongAnswers);
+}
+
+// 결과 표시
+function showResult(total, correct, score, wrongAnswers) {
+  document.getElementById('examModal').classList.add('hidden');
+  
+  document.getElementById('resultTotal').textContent = total;
+  document.getElementById('resultCorrect').textContent = correct;
+  document.getElementById('resultScore').textContent = score;
+  
+  // 오답 목록
+  const wrongContainer = document.getElementById('wrongAnswersContainer');
+  wrongContainer.innerHTML = '';
+  
+  if (wrongAnswers.length > 0) {
+    wrongContainer.innerHTML = '<h3 class="font-semibold text-gray-800 mb-3">틀린 문제</h3>';
+    wrongAnswers.forEach(w => {
+      const wrongDiv = document.createElement('div');
+      wrongDiv.className = 'bg-red-50 border-l-4 border-red-500 p-3 mb-2 text-sm';
+      wrongDiv.innerHTML = `
+        <p class="font-semibold text-red-800">문제 ${w.number}</p>
+        <p class="text-gray-700 mb-1">${w.question}</p>
+        <p class="text-sm"><span class="text-red-600">내 답: ${w.userAnswer}</span> / <span class="text-green-600">정답: ${w.correctAnswer}</span></p>
+      `;
+      wrongContainer.appendChild(wrongDiv);
+    });
+  } else {
+    wrongContainer.innerHTML = '<p class="text-green-600 font-semibold text-center">모든 문제를 맞추셨습니다! 🎉</p>';
+  }
+  
+  document.getElementById('resultModal').classList.remove('hidden');
+  document.getElementById('resultModal').classList.add('flex');
+}
+
+// 모달 닫기
+function closeExamModal() {
+  if (confirm('시험을 종료하시겠습니까? 진행 상황이 저장되지 않습니다.')) {
+    document.getElementById('examModal').classList.add('hidden');
+    document.getElementById('examModal').classList.remove('flex');
+  }
+}
+
+function closeResultModal() {
+  document.getElementById('resultModal').classList.add('hidden');
+  document.getElementById('resultModal').classList.remove('flex');
+}
+
+// 다시 풀기
+function retryExam() {
+  closeResultModal();
+  startExam();
+}
+
+// 문제 관리 모달 열기
+function openQuestionManager() {
+  document.getElementById('managerModal').classList.remove('hidden');
+  document.getElementById('managerModal').classList.add('flex');
+  loadQuestionList();
+}
+
+function closeQuestionManager() {
+  document.getElementById('managerModal').classList.add('hidden');
+  document.getElementById('managerModal').classList.remove('flex');
+}
+
+// 문제 목록 로드
+function loadQuestionList() {
+  const category = document.getElementById('managerCategorySelector').value;
+  
+  fetch(`/api/exam_questions?category=${encodeURIComponent(category)}`)
+    .then(res => res.json())
+    .then(data => {
+      const tbody = document.getElementById('questionListTable');
+      tbody.innerHTML = '';
+      
+      if (data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="border px-4 py-3 text-center text-gray-500">등록된 문제가 없습니다.</td></tr>';
+        return;
+      }
+      
+      data.forEach(q => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-50';
+        tr.innerHTML = `
+          <td class="border px-3 py-2 text-center">${q.number || '-'}</td>
+          <td class="border px-3 py-2">${q.category || '-'}</td>
+          <td class="border px-3 py-2">${q.question}</td>
+          <td class="border px-3 py-2 text-center">
+            <button onclick="editQuestion(${q.id})" class="bg-blue-500 text-white px-2 py-1 rounded text-xs mr-1 hover:bg-blue-600">수정</button>
+            <button onclick="deleteQuestion(${q.id})" class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600">삭제</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(err => {
+      console.error('문제 목록 로드 실패:', err);
+      alert('문제 목록을 불러오는데 실패했습니다.');
+    });
+}
+
+// 문제 추가 모달 열기
+function openAddQuestionModal() {
+  document.getElementById('questionFormModal').classList.remove('hidden');
+  document.getElementById('questionFormModal').classList.add('flex');
+  document.getElementById('questionFormTitle').textContent = '문제 추가';
+  document.getElementById('questionForm').reset();
+  document.getElementById('questionId').value = '';
+}
+
+function closeQuestionFormModal() {
+  document.getElementById('questionFormModal').classList.add('hidden');
+  document.getElementById('questionFormModal').classList.remove('flex');
+}
+
+// 문제 저장
+function saveQuestion() {
+  const id = document.getElementById('questionId').value;
+  const category = document.getElementById('formCategory').value.trim();
+  const number = document.getElementById('formNumber').value;
+  const question = document.getElementById('formQuestion').value.trim();
+  const choice_a = document.getElementById('formChoiceA').value.trim();
+  const choice_b = document.getElementById('formChoiceB').value.trim();
+  const choice_c = document.getElementById('formChoiceC').value.trim();
+  const choice_d = document.getElementById('formChoiceD').value.trim();
+  const answer = document.getElementById('formAnswer').value;
+  
+  if (!question || !answer) {
+    alert('문제와 정답은 필수입니다.');
+    return;
+  }
+  
+  const data = {
+    category, number: number ? parseInt(number) : null,
+    question, choice_a, choice_b, choice_c, choice_d, answer
+  };
+  
+  const url = id ? `/api/exam_questions/${id}` : '/api/exam_questions';
+  const method = id ? 'PUT' : 'POST';
+  
+  fetch(url, {
+    method: method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  })
+  .then(res => res.json())
+  .then(result => {
+    if (result.ok) {
+      alert(id ? '문제가 수정되었습니다.' : '문제가 추가되었습니다.');
+      closeQuestionFormModal();
+      loadQuestionList();
+    } else {
+      alert('오류: ' + (result.error || '알 수 없는 오류'));
+    }
+  })
+  .catch(err => {
+    console.error('문제 저장 실패:', err);
+    alert('문제 저장에 실패했습니다.');
+  });
+}
+
+// 문제 수정
+function editQuestion(id) {
+  fetch(`/api/exam_questions/${id}`)
+    .then(res => res.json())
+    .then(q => {
+      document.getElementById('questionFormTitle').textContent = '문제 수정';
+      document.getElementById('questionId').value = q.id;
+      document.getElementById('formCategory').value = q.category || '';
+      document.getElementById('formNumber').value = q.number || '';
+      document.getElementById('formQuestion').value = q.question;
+      document.getElementById('formChoiceA').value = q.choice_a || '';
+      document.getElementById('formChoiceB').value = q.choice_b || '';
+      document.getElementById('formChoiceC').value = q.choice_c || '';
+      document.getElementById('formChoiceD').value = q.choice_d || '';
+      document.getElementById('formAnswer').value = q.answer;
+      
+      document.getElementById('questionFormModal').classList.remove('hidden');
+      document.getElementById('questionFormModal').classList.add('flex');
+    })
+    .catch(err => {
+      console.error('문제 로드 실패:', err);
+      alert('문제를 불러오는데 실패했습니다.');
+    });
+}
+
+// 문제 삭제
+function deleteQuestion(id) {
+  if (!confirm('정말 이 문제를 삭제하시겠습니까?')) return;
+  
+  fetch(`/api/exam_questions/${id}`, { method: 'DELETE' })
+    .then(res => res.json())
+    .then(result => {
+      if (result.ok) {
+        alert('문제가 삭제되었습니다.');
+        loadQuestionList();
+      } else {
+        alert('오류: ' + (result.error || '알 수 없는 오류'));
+      }
+    })
+    .catch(err => {
+      console.error('문제 삭제 실패:', err);
+      alert('문제 삭제에 실패했습니다.');
+    });
+}
+</script>
+
+{% endblock %}
