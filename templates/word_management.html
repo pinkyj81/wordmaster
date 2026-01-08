@@ -183,7 +183,7 @@ function loadWordsByText() {
         return;
       }
 
-      words.forEach(word => {
+      words.forEach((word, index) => {
         // 원본 데이터 저장
         originalWords[word.id] = {
           word: word.word,
@@ -203,7 +203,7 @@ function loadWordsByText() {
           <td class="border text-center">
             <input type="checkbox" id="learned-${word.id}" ${isLearned} class="m-2">
           </td>
-          <td class="border text-center px-2 py-1">${word.id}</td>
+          <td class="border text-center px-2 py-1">${index + 1}</td>
           <td class="border">
             <div id="word-${word.id}" 
                  class="excel-cell" 

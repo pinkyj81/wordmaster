@@ -172,9 +172,13 @@ def index():
         # 등록된 출처가 없으면 빈 목록 반환
         return render_template('index.html', texts=[], sources=[])
     
+    # 현재 로그인한 사용자 ID
+    current_user_id = session.get('db_user_id', session.get('user_name', 'Unknown'))
+    
     # IN 절을 위한 파라미터 생성
     source_params = {f'src{i}': src for i, src in enumerate(user_sources)}
     source_placeholders = ', '.join([f':src{i}' for i in range(len(user_sources))])
+    source_params['current_user_id'] = current_user_id
     
     query = text(f"""
         SELECT
@@ -205,6 +209,7 @@ LEFT JOIN (
         LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1) AS text_id,
         COUNT(*) AS test_count
     FROM test_records_rows
+    WHERE user_id = :current_user_id
     GROUP BY LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1)
 ) tc ON t.id = tc.text_id
 
@@ -302,11 +307,17 @@ def flashcards(text_id):
 
 # ✅ API: refresh counts for a text (word_count, test_count)
 @app.route('/_refresh_text_counts/<text_id>')
+@login_required
 def refresh_text_counts(text_id):
     wc_row = db.session.execute(text("SELECT COUNT(*) AS cnt FROM words_rows WHERE text_id = :text_id"), {"text_id": text_id}).fetchone()
     word_count = wc_row.cnt if hasattr(wc_row, 'cnt') else (wc_row[0] if wc_row else 0)
 
-    tc_row = db.session.execute(text("SELECT COUNT(*) AS cnt FROM test_records_rows WHERE LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1) = :text_id"), {"text_id": text_id}).fetchone()
+    # 현재 로그인한 사용자의 테스트 기록만 카운트
+    current_user_id = session.get('db_user_id', session.get('user_name', 'Unknown'))
+    tc_row = db.session.execute(
+        text("SELECT COUNT(*) AS cnt FROM test_records_rows WHERE LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1) = :text_id AND user_id = :user_id"),
+        {"text_id": text_id, "user_id": current_user_id}
+    ).fetchone()
     test_count = tc_row.cnt if hasattr(tc_row, 'cnt') else (tc_row[0] if tc_row else 0)
 
     return jsonify({"word_count": int(word_count), "test_count": int(test_count)})
