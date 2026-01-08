@@ -146,7 +146,7 @@
                 <select id="user_id" name="user_id" required>
                     <option value="">사용자를 선택하세요</option>
                     {% for user in users %}
-                    <option value="{{ user.id }}">{{ user.name }}</option>
+                    <option value="{{ user }}">{{ user }}</option>
                     {% endfor %}
                 </select>
             </div>

@@ -22,10 +22,12 @@ db = SQLAlchemy(app)
 
 # ✅ 사용자 목록 (간단한 구현)
 USERS = [
-    {"id": "user1", "name": "박영진"},
-    {"id": "user2", "name": "권혁재"},
-    {"id": "user3", "name": "권유현"},
-    {"id": "user4", "name": "GUEST"},
+    {"id": "user1", "name": "박영진", "user_id": "박영진", "is_admin": True},
+    {"id": "user2", "name": "권혁재", "user_id": "권혁재", "is_admin": False},
+    {"id": "user3", "name": "권유현", "user_id": "권유현", "is_admin": False},
+    {"id": "user4", "name": "GUEST", "user_id": "GUEST", "is_admin": False},
+    {"id": "user5", "name": "사용자5", "user_id": "사용자5", "is_admin": False},
+    {"id": "user6", "name": "사용자6", "user_id": "사용자6", "is_admin": False},
 ]
 
 # ✅ 로그인 체크 데코레이터
@@ -76,8 +78,6 @@ class WordsRow(db.Model):
     id = db.Column(db.String, primary_key=True)
     word = db.Column(db.String, nullable=False)
     meaning = db.Column(db.String, nullable=False)
-    pronunciation = db.Column(db.String)
-    sentence = db.Column(db.String)
     is_learned = db.Column(db.Boolean, nullable=True)
     text_id = db.Column(db.String, nullable=True)
     text_title = db.Column(db.String, nullable=True)
@@ -85,6 +85,7 @@ class WordsRow(db.Model):
     created_at = db.Column(db.String)
     updated_at = db.Column(db.String)
     example = db.Column(db.String)
+    exam_korean = db.Column(db.String)
 
 # ✅ 시험 문제 모델
 class ExamQuestion(db.Model):
@@ -112,6 +113,7 @@ class TestRecord(db.Model):
     completed_at = db.Column(db.DateTime)
     test_words = db.Column(db.String)
     created_at = db.Column(db.DateTime)
+    user_id = db.Column(db.String(50))
 
 # ✅ 사용자-소스 매핑 모델
 class WordUser(db.Model):
@@ -124,15 +126,35 @@ class WordUser(db.Model):
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        user_id = request.form.get('user_id')
-        user = next((u for u in USERS if u['id'] == user_id), None)
-        if user:
-            session['user_id'] = user['id']
-            session['user_name'] = user['name']
+        selected_name = request.form.get('user_id')
+        
+        # word_users에서 해당 사용자가 있는지 확인
+        user_exists = db.session.execute(
+            text("SELECT COUNT(*) as cnt FROM word_users WHERE user_name = :name"),
+            {"name": selected_name}
+        ).fetchone()
+        
+        if user_exists and user_exists.cnt > 0:
+            # USERS 리스트에서 관리자 정보 확인 (없으면 일반 사용자)
+            static_user = next((u for u in USERS if u['name'] == selected_name), None)
+            is_admin = static_user.get('is_admin', False) if static_user else False
+            
+            session['user_id'] = f"user_{selected_name}"
+            session['user_name'] = selected_name
+            session['db_user_id'] = selected_name  # DB에 저장될 user_id (문자열)
+            session['is_admin'] = is_admin
             return redirect(url_for('index'))
         else:
-            return render_template('login.html', users=USERS, error='사용자를 선택하세요.')
-    return render_template('login.html', users=USERS)
+            # word_users에 등록된 사용자 목록 조회
+            registered_users_query = text("SELECT DISTINCT user_name FROM word_users ORDER BY user_name")
+            registered_names = [r.user_name for r in db.session.execute(registered_users_query).fetchall()]
+            return render_template('login.html', users=registered_names, error='사용자를 선택하세요.')
+    
+    # word_users에 등록된 사용자 목록 조회
+    registered_users_query = text("SELECT DISTINCT user_name FROM word_users ORDER BY user_name")
+    registered_names = [r.user_name for r in db.session.execute(registered_users_query).fetchall()]
+    
+    return render_template('login.html', users=registered_names)
 
 # ✅ 로그아웃
 @app.route('/logout')
@@ -234,6 +256,7 @@ def word_test(text_id):
 
 # ✅ 테스트 결과 저장
 @app.route('/save_test_result', methods=['POST'])
+@login_required
 def save_test_result():
     data = request.get_json()
     record_id = str(uuid.uuid4())
@@ -243,13 +266,14 @@ def save_test_result():
     correct = data.get('correct_answers', 0)
     duration = data.get('duration', 0)
     wrong_words = json.dumps(data.get('wrong_words', []), ensure_ascii=False)
+    user_id = session.get('db_user_id', session.get('user_name', 'Unknown'))
 
     try:
         insert_query = text("""
             INSERT INTO test_records_rows 
-                (id, test_name, total_questions, correct_answers, score, duration, test_words, completed_at, created_at)
+                (id, test_name, total_questions, correct_answers, score, duration, test_words, completed_at, created_at, user_id)
             VALUES 
-                (:id, :test_name, :total_questions, :correct_answers, :score, :duration, :test_words, SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET())
+                (:id, :test_name, :total_questions, :correct_answers, :score, :duration, :test_words, SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET(), :user_id)
         """)
         db.session.execute(insert_query, {
             "id": record_id,
@@ -258,7 +282,8 @@ def save_test_result():
             "correct_answers": correct,
             "score": score,
             "duration": duration,
-            "test_words": wrong_words
+            "test_words": wrong_words,
+            "user_id": user_id
         })
         db.session.commit()
         return jsonify({"message": "저장 완료", "score": score})
@@ -296,46 +321,102 @@ def word_management():
     return render_template('word_management.html', sources=user_sources)
 
 @app.route('/learning_log')
+@login_required
 def learning_log():
     q = request.args.get('q', '').strip()
+    view_all = request.args.get('view_all', '0') == '1'
+    user_id = session.get('db_user_id')
+    is_admin = session.get('is_admin', False)
+    
+    # 디버깅: user_id가 None인 경우 체크
+    if user_id is None:
+        print(f"WARNING: db_user_id is None in session. Session data: {dict(session)}")
+        user_id = session.get('user_name', 'Unknown')  # 기본값
+    
+    # user_id를 user_name으로 매핑 (user_id가 이미 이름이므로 그대로 사용)
+    user_map = {u['user_id']: u['name'] for u in USERS}
+    
+    # 관리자가 전체 보기를 선택한 경우
+    show_all = is_admin and view_all
+    
+    print(f"DEBUG: user_id={user_id}, is_admin={is_admin}, view_all={view_all}, show_all={show_all}")
 
     if q:
-        logs_query = text("""
-            SELECT id, test_name, total_questions, correct_answers, score, duration, completed_at, test_words
-            FROM test_records_rows
-            WHERE test_name LIKE :q
-            ORDER BY completed_at DESC
-        """)
-        logs = db.session.execute(logs_query, {"q": f"%{q}%"}).fetchall()
+        if show_all:
+            logs_query = text("""
+                SELECT id, test_name, total_questions, correct_answers, score, duration, completed_at, test_words, user_id
+                FROM test_records_rows
+                WHERE test_name LIKE :q
+                ORDER BY completed_at DESC
+            """)
+            logs = db.session.execute(logs_query, {"q": f"%{q}%"}).fetchall()
 
-        summary_query = text("""
-            SELECT test_name, COUNT(*) AS test_count
-            FROM test_records_rows
-            WHERE test_name LIKE :q
-            GROUP BY test_name
-            ORDER BY test_count DESC
-        """)
-        summary_rows = db.session.execute(summary_query, {"q": f"%{q}%"}).fetchall()
+            summary_query = text("""
+                SELECT test_name, COUNT(*) AS test_count
+                FROM test_records_rows
+                WHERE test_name LIKE :q
+                GROUP BY test_name
+                ORDER BY test_count DESC
+            """)
+            summary_rows = db.session.execute(summary_query, {"q": f"%{q}%"}).fetchall()
+        else:
+            logs_query = text("""
+                SELECT id, test_name, total_questions, correct_answers, score, duration, completed_at, test_words, user_id
+                FROM test_records_rows
+                WHERE test_name LIKE :q AND user_id = :user_id
+                ORDER BY completed_at DESC
+            """)
+            logs = db.session.execute(logs_query, {"q": f"%{q}%", "user_id": user_id}).fetchall()
+
+            summary_query = text("""
+                SELECT test_name, COUNT(*) AS test_count
+                FROM test_records_rows
+                WHERE test_name LIKE :q AND user_id = :user_id
+                GROUP BY test_name
+                ORDER BY test_count DESC
+            """)
+            summary_rows = db.session.execute(summary_query, {"q": f"%{q}%", "user_id": user_id}).fetchall()
     else:
-        logs_query = text("""
-            SELECT id, test_name, total_questions, correct_answers, score, duration, completed_at, test_words
-            FROM test_records_rows
-            ORDER BY completed_at DESC
-        """)
-        logs = db.session.execute(logs_query).fetchall()
+        if show_all:
+            logs_query = text("""
+                SELECT id, test_name, total_questions, correct_answers, score, duration, completed_at, test_words, user_id
+                FROM test_records_rows
+                ORDER BY completed_at DESC
+            """)
+            logs = db.session.execute(logs_query).fetchall()
 
-        summary_query = text("""
-            SELECT test_name, COUNT(*) AS test_count
-            FROM test_records_rows
-            GROUP BY test_name
-            ORDER BY test_count DESC
-        """)
-        summary_rows = db.session.execute(summary_query).fetchall()
+            summary_query = text("""
+                SELECT test_name, COUNT(*) AS test_count
+                FROM test_records_rows
+                GROUP BY test_name
+                ORDER BY test_count DESC
+            """)
+            summary_rows = db.session.execute(summary_query).fetchall()
+        else:
+            logs_query = text("""
+                SELECT id, test_name, total_questions, correct_answers, score, duration, completed_at, test_words, user_id
+                FROM test_records_rows
+                WHERE user_id = :user_id
+                ORDER BY completed_at DESC
+            """)
+            logs = db.session.execute(logs_query, {"user_id": user_id}).fetchall()
+
+            summary_query = text("""
+                SELECT test_name, COUNT(*) AS test_count
+                FROM test_records_rows
+                WHERE user_id = :user_id
+                GROUP BY test_name
+                ORDER BY test_count DESC
+            """)
+            summary_rows = db.session.execute(summary_query, {"user_id": user_id}).fetchall()
 
     summary = [{"test_name": r.test_name, "test_count": r.test_count} for r in summary_rows]
 
     # distinct test names for datalist/autocomplete
-    tn_rows = db.session.execute(text("SELECT DISTINCT test_name FROM test_records_rows ORDER BY test_name")).fetchall()
+    if show_all:
+        tn_rows = db.session.execute(text("SELECT DISTINCT test_name FROM test_records_rows ORDER BY test_name")).fetchall()
+    else:
+        tn_rows = db.session.execute(text("SELECT DISTINCT test_name FROM test_records_rows WHERE user_id = :user_id ORDER BY test_name"), {"user_id": user_id}).fetchall()
     test_names = [r.test_name for r in tn_rows]
 
     formatted_logs = []
@@ -352,10 +433,11 @@ def learning_log():
             "score": float(row.score),
             "duration": row.duration,
             "completed_at": row.completed_at,
-            "test_words": wrong_list
+            "test_words": wrong_list,
+            "user_name": user_map.get(row.user_id, f'User {row.user_id}')
         })
 
-    return render_template('learning_log.html', logs=formatted_logs, summary=summary, q=q, test_names=test_names)
+    return render_template('learning_log.html', logs=formatted_logs, summary=summary, q=q, test_names=test_names, is_admin=is_admin, view_all=view_all)
 
 
 # ✅ 발음 듣기 (미국식)
@@ -1044,6 +1126,31 @@ def api_delete_user(user_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
+# ✅ 디버그: 테스트 기록의 user_id 확인
+@app.route('/debug/test_records')
+@login_required
+def debug_test_records():
+    """디버그용: 최근 10개 테스트 기록의 user_id 확인"""
+    records = db.session.execute(text("""
+        SELECT TOP 10 id, test_name, user_id, completed_at
+        FROM test_records_rows
+        ORDER BY completed_at DESC
+    """)).fetchall()
+    
+    result = [{
+        "id": r.id,
+        "test_name": r.test_name,
+        "user_id": r.user_id,
+        "completed_at": str(r.completed_at)
+    } for r in records]
+    
+    return jsonify({
+        "current_session_user_id": session.get('db_user_id'),
+        "current_session_user_name": session.get('user_name'),
+        "is_admin": session.get('is_admin'),
+        "recent_records": result
+    })
 
 # ✅ 서버 실행
 if __name__ == '__main__':

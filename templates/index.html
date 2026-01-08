@@ -1016,15 +1016,6 @@ function loadUserList() {
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-gray-50';
         
-        // 출처 드롭다운 생성
-        let sourceOptions = '<option value="">출처 선택</option>';
-        if (window.availableSources) {
-          window.availableSources.forEach(src => {
-            const selected = src === user.source ? 'selected' : '';
-            sourceOptions += `<option value="${src}" ${selected}>${src}</option>`;
-          });
-        }
-        
         tr.innerHTML = `
           <td class="border px-4 py-2">${user.id}</td>
           <td class="border px-4 py-2">
@@ -1032,9 +1023,8 @@ function loadUserList() {
                    class="w-full px-2 py-1 border rounded focus:border-blue-500">
           </td>
           <td class="border px-4 py-2">
-            <select id="userSource-${user.id}" class="w-full px-2 py-1 border rounded focus:border-blue-500">
-              ${sourceOptions}
-            </select>
+            <span class="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm font-medium">${user.source}</span>
+            <input type="hidden" id="userSource-${user.id}" value="${user.source}">
           </td>
           <td class="border px-4 py-2 text-center space-x-2">
             <button onclick="updateUser(${user.id})" 

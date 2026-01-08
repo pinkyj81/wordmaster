@@ -141,19 +141,27 @@ function submitWordUpload() {
 
 // ✅ 텍스트 선택 목록 로드
 function loadTextOptions() {
-  fetch('/')
-    .then(() => {
-      // 이미 페이지에서 texts를 렌더링 중이라면 select를 직접 구성
-      const select = document.getElementById('textSelect');
-      if (select.options.length <= 1) {
-        const texts = [...document.querySelectorAll('[data-text-id]')];
-        texts.forEach(el => {
-          const option = document.createElement('option');
-          option.value = el.dataset.textId;
-          option.textContent = el.dataset.textTitle;
-          select.appendChild(option);
-        });
-      }
+  const select = document.getElementById('textSelect');
+  
+  // 기존 옵션 초기화 (첫 번째 기본 옵션 제외)
+  while (select.options.length > 1) {
+    select.remove(1);
+  }
+  
+  // API를 통해 텍스트 목록 가져오기
+  fetch('/get_text_titles')
+    .then(res => res.json())
+    .then(texts => {
+      texts.forEach(text => {
+        const option = document.createElement('option');
+        option.value = text.id;
+        option.textContent = text.title;
+        select.appendChild(option);
+      });
+    })
+    .catch(err => {
+      console.error('텍스트 목록 로드 실패:', err);
+      alert('❌ 텍스트 목록을 불러올 수 없습니다.');
     });
 }
 </script>
