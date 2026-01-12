@@ -1,7 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h2 class="text-2xl font-semibold mb-6 text-gray-800">문제 풀기</h2>
+<h2 class="text-2xl font-semibold mb-6 text-gray-800">문제 풀기 & 학습하기</h2>
+
+<!-- 모드 선택 -->
+<div class="mb-6">
+  <label class="block mb-2 text-gray-700 font-medium">모드 선택</label>
+  <div class="flex gap-3">
+    <button id="examModeBtn" onclick="switchMode('exam')" class="px-6 py-2 rounded-lg font-semibold transition bg-blue-600 text-white">
+      📝 시험 모드
+    </button>
+    <button id="studyModeBtn" onclick="switchMode('study')" class="px-6 py-2 rounded-lg font-semibold transition bg-gray-300 text-gray-700 hover:bg-gray-400">
+      📚 학습 모드
+    </button>
+  </div>
+  <p class="text-sm text-gray-500 mt-2" id="modeDescription">시험 모드: 객관식 문제를 풀고 채점합니다</p>
+</div>
 
 <!-- 카테고리 선택 -->
 <div class="mb-6">
@@ -16,21 +30,24 @@
 
 <!-- 시작 버튼 -->
 <div class="mb-6 flex gap-3">
-  <button onclick="startExam()" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition font-semibold">
-    문제 풀기 시작
+  <button onclick="startSession()" id="startBtn" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition font-semibold">
+    시작하기
+  </button>
+  <button onclick="printStudyMaterial()" id="printBtn" class="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition font-semibold hidden">
+    🖨️ 출력
   </button>
   <button onclick="openQuestionManager()" class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition font-semibold">
     문제 관리
   </button>
 </div>
 
-<!-- 문제 풀기 모달 -->
+<!-- 문제 풀기/학습하기 모달 -->
 <div id="examModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
   <div class="bg-white rounded-2xl shadow-2xl w-[900px] max-h-[90vh] overflow-y-auto p-8 relative">
     <!-- 헤더 -->
     <div class="flex justify-between items-center mb-6 border-b pb-4">
       <div>
-        <h2 class="text-2xl font-bold text-gray-800">문제 풀기</h2>
+        <h2 class="text-2xl font-bold text-gray-800" id="modalTitle">문제 풀기</h2>
         <p class="text-sm text-gray-500 mt-1">문제: <span id="currentQuestionNum">1</span> / <span id="totalQuestions">0</span></p>
       </div>
       <button onclick="closeExamModal()" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
@@ -47,12 +64,24 @@
     <div id="questionContainer" class="mb-6">
       <div class="bg-blue-50 border-l-4 border-blue-600 p-6 mb-6 rounded">
         <p class="text-sm text-blue-800 font-semibold mb-2">문제 <span id="questionNumber"></span></p>
-        <p id="questionText" class="text-lg text-gray-800 font-medium leading-relaxed whitespace-pre-wrap"></p>
+        <p id="questionText" class="text-lg text-gray-800 font-medium leading-relaxed whitespace-pre-line"></p>
       </div>
 
-      <!-- 보기 -->
+      <!-- 보기 (시험 모드) -->
       <div id="choicesContainer" class="space-y-3">
         <!-- 동적으로 생성됩니다 -->
+      </div>
+
+      <!-- 정답 & 힌트 (학습 모드) -->
+      <div id="studyAnswerContainer" class="hidden">
+        <div class="bg-green-50 border-l-4 border-green-600 p-6 mb-4 rounded">
+          <p class="text-sm text-green-800 font-semibold mb-2">정답</p>
+          <p id="answerText" class="text-xl text-gray-800 font-bold"></p>
+        </div>
+        <div class="bg-yellow-50 border-l-4 border-yellow-600 p-6 rounded">
+          <p class="text-sm text-yellow-800 font-semibold mb-2">힌트 / 의미</p>
+          <p id="hintText" class="text-lg text-gray-700"></p>
+        </div>
       </div>
     </div>
 
@@ -66,6 +95,9 @@
       </button>
       <button onclick="submitExam()" id="submitBtn" class="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition hidden">
         제출
+      </button>
+      <button onclick="completeStudy()" id="completeStudyBtn" class="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700 transition hidden">
+        학습 완료
       </button>
     </div>
   </div>
@@ -301,6 +333,123 @@ let currentQuestionIndex = 0;
 let userAnswers = [];
 let selectedCategory = '';
 let bulkQuestionsData = [];
+let currentMode = 'exam'; // 'exam' or 'study'
+
+// 모드 전환
+function switchMode(mode) {
+  currentMode = mode;
+  
+  const examBtn = document.getElementById('examModeBtn');
+  const studyBtn = document.getElementById('studyModeBtn');
+  const modeDesc = document.getElementById('modeDescription');
+  const printBtn = document.getElementById('printBtn');
+  
+  if (mode === 'exam') {
+    examBtn.className = 'px-6 py-2 rounded-lg font-semibold transition bg-blue-600 text-white';
+    studyBtn.className = 'px-6 py-2 rounded-lg font-semibold transition bg-gray-300 text-gray-700 hover:bg-gray-400';
+    modeDesc.textContent = '시험 모드: 객관식 문제를 풀고 채점합니다';
+    printBtn.classList.add('hidden');
+  } else {
+    examBtn.className = 'px-6 py-2 rounded-lg font-semibold transition bg-gray-300 text-gray-700 hover:bg-gray-400';
+    studyBtn.className = 'px-6 py-2 rounded-lg font-semibold transition bg-purple-600 text-white';
+    modeDesc.textContent = '학습 모드: 정답과 힌트를 보며 학습합니다';
+    printBtn.classList.remove('hidden');
+  }
+}
+
+// 세션 시작 (통합)
+function startSession() {
+  if (currentMode === 'exam') {
+    startExam();
+  } else {
+    startStudy();
+  }
+}
+
+// 학습 모드 시작
+function startStudy() {
+  selectedCategory = document.getElementById('categorySelector').value;
+  
+  if (!selectedCategory) {
+    alert('카테고리를 선택하세요.');
+    return;
+  }
+
+  // 학습 문제 불러오기
+  fetch(`/api/study_questions?category=${encodeURIComponent(selectedCategory)}`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.length === 0) {
+        alert('선택한 카테고리에 학습 문제가 없습니다.');
+        return;
+      }
+      
+      questions = data;
+      currentQuestionIndex = 0;
+      
+      // 모달 표시
+      document.getElementById('modalTitle').textContent = '학습하기';
+      document.getElementById('examModal').classList.remove('hidden');
+      document.getElementById('examModal').classList.add('flex');
+      
+      // 첫 문제 표시
+      displayStudyQuestion();
+    })
+    .catch(err => {
+      console.error('학습 문제 로드 실패:', err);
+      alert('학습 문제를 불러오는데 실패했습니다.');
+    });
+}
+
+// 학습 문제 표시
+function displayStudyQuestion() {
+  if (questions.length === 0) return;
+  
+  const question = questions[currentQuestionIndex];
+  
+  // 진행률 업데이트
+  const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
+  document.getElementById('progressBar').style.width = progress + '%';
+  
+  // 문제 번호
+  document.getElementById('currentQuestionNum').textContent = currentQuestionIndex + 1;
+  document.getElementById('totalQuestions').textContent = questions.length;
+  document.getElementById('questionNumber').textContent = currentQuestionIndex + 1;
+  
+  // 문제 텍스트 (대화문 줄바꿈 처리)
+  let questionText = question.question;
+  if (questionText.includes('A:') && questionText.includes('B:')) {
+    questionText = questionText.replace(' B:', '\nB:');
+  }
+  document.getElementById('questionText').textContent = questionText;
+  
+  // 정답 & 힌트 표시
+  document.getElementById('answerText').textContent = question.correct_word;
+  document.getElementById('hintText').textContent = question.meaning || '의미 정보 없음';
+  
+  // UI 전환
+  document.getElementById('choicesContainer').classList.add('hidden');
+  document.getElementById('studyAnswerContainer').classList.remove('hidden');
+  document.getElementById('submitBtn').classList.add('hidden');
+  document.getElementById('completeStudyBtn').classList.remove('hidden');
+  
+  // 버튼 상태
+  document.getElementById('prevBtn').disabled = currentQuestionIndex === 0;
+  
+  if (currentQuestionIndex === questions.length - 1) {
+    document.getElementById('nextBtn').classList.add('hidden');
+    document.getElementById('completeStudyBtn').classList.remove('hidden');
+  } else {
+    document.getElementById('nextBtn').classList.remove('hidden');
+    document.getElementById('completeStudyBtn').classList.add('hidden');
+  }
+}
+
+// 학습 완료
+function completeStudy() {
+  alert(`${questions.length}개 문제 학습을 완료했습니다! 🎉`);
+  closeExamModal();
+}
 
 // 엑셀 붙여넣기 모달 열기
 function openBulkPasteModal() {
@@ -434,6 +583,7 @@ function startExam() {
       userAnswers = new Array(questions.length).fill(null);
       
       // 모달 표시
+      document.getElementById('modalTitle').textContent = '문제 풀기';
       document.getElementById('examModal').classList.remove('hidden');
       document.getElementById('examModal').classList.add('flex');
       
@@ -463,6 +613,11 @@ function displayQuestion() {
   
   // 문제 텍스트
   document.getElementById('questionText').textContent = question.question;
+  
+  // UI 전환
+  document.getElementById('choicesContainer').classList.remove('hidden');
+  document.getElementById('studyAnswerContainer').classList.add('hidden');
+  document.getElementById('completeStudyBtn').classList.add('hidden');
   
   // 보기 생성
   const choicesContainer = document.getElementById('choicesContainer');
@@ -518,7 +673,11 @@ function selectAnswer(answer) {
 function prevQuestion() {
   if (currentQuestionIndex > 0) {
     currentQuestionIndex--;
-    displayQuestion();
+    if (currentMode === 'study') {
+      displayStudyQuestion();
+    } else {
+      displayQuestion();
+    }
   }
 }
 
@@ -526,7 +685,11 @@ function prevQuestion() {
 function nextQuestion() {
   if (currentQuestionIndex < questions.length - 1) {
     currentQuestionIndex++;
-    displayQuestion();
+    if (currentMode === 'study') {
+      displayStudyQuestion();
+    } else {
+      displayQuestion();
+    }
   }
 }
 
@@ -611,7 +774,8 @@ function showResult(total, correct, score, wrongAnswers) {
 
 // 모달 닫기
 function closeExamModal() {
-  if (confirm('시험을 종료하시겠습니까? 진행 상황이 저장되지 않습니다.')) {
+  const confirmMessage = currentMode === 'study' ? '학습을 종료하시겠습니까?' : '시험을 종료하시겠습니까? 진행 상황이 저장되지 않습니다.';
+  if (confirm(confirmMessage)) {
     document.getElementById('examModal').classList.add('hidden');
     document.getElementById('examModal').classList.remove('flex');
   }
@@ -620,6 +784,228 @@ function closeExamModal() {
 function closeResultModal() {
   document.getElementById('resultModal').classList.add('hidden');
   document.getElementById('resultModal').classList.remove('flex');
+}
+
+// 학습 자료 출력
+function printStudyMaterial() {
+  const category = document.getElementById('categorySelector').value;
+  
+  if (!category) {
+    alert('카테고리를 먼저 선택하세요.');
+    return;
+  }
+  
+  // 학습 문제 가져오기
+  fetch(`/api/study_questions?category=${encodeURIComponent(category)}`)
+    .then(res => res.json())
+    .then(data => {
+      if (data.length === 0) {
+        alert('선택한 카테고리에 학습 문제가 없습니다.');
+        return;
+      }
+      
+      // 인쇄용 HTML 생성
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>${category} - 학습 자료</title>
+  <style>
+    @media print {
+      @page {
+        margin: 0.8cm;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      .page-break {
+        page-break-after: always;
+      }
+      .no-print {
+        display: none;
+      }
+    }
+    
+    body {
+      font-family: 'Malgun Gothic', sans-serif;
+      line-height: 1.4;
+      color: #333;
+      max-width: 210mm;
+      margin: 0 auto;
+      padding: 15px;
+    }
+    
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #4F46E5;
+      padding-bottom: 8px;
+      margin-bottom: 15px;
+    }
+    
+    .header h1 {
+      margin: 0;
+      color: #4F46E5;
+      font-size: 22px;
+    }
+    
+    .header p {
+      margin: 3px 0 0 0;
+      color: #666;
+      font-size: 11px;
+    }
+    
+    .question-item {
+      margin-bottom: 15px;
+      padding: 10px;
+      border: 1px solid #E5E7EB;
+      border-radius: 5px;
+      background: #F9FAFB;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    
+    .question-number {
+      font-weight: bold;
+      color: #4F46E5;
+      font-size: 14px;
+      margin-bottom: 5px;
+    }
+    
+    .question-text {
+      font-size: 15px;
+      margin-bottom: 8px;
+      white-space: pre-line;
+      line-height: 1.6;
+      font-weight: 500;
+    }
+    
+    .answer-hint-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    
+    .answer-section {
+      background: #DBEAFE;
+      padding: 6px 8px;
+      border-radius: 4px;
+    }
+    
+    .answer-label {
+      font-weight: bold;
+      color: #1E40AF;
+      font-size: 10px;
+      margin-bottom: 2px;
+    }
+    
+    .answer-text {
+      color: #1E3A8A;
+      font-size: 13px;
+      font-weight: bold;
+    }
+    
+    .hint-section {
+      background: #FEF3C7;
+      padding: 6px 8px;
+      border-radius: 4px;
+    }
+    
+    .hint-label {
+      font-weight: bold;
+      color: #92400E;
+      font-size: 10px;
+      margin-bottom: 2px;
+    }
+    
+    .hint-text {
+      color: #78350F;
+      font-size: 11px;
+    }
+    
+    .footer {
+      text-align: center;
+      margin-top: 20px;
+      padding-top: 10px;
+      border-top: 1px solid #E5E7EB;
+      color: #9CA3AF;
+      font-size: 10px;
+    }
+    
+    .print-button {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #4F46E5;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      z-index: 1000;
+    }
+    
+    .print-button:hover {
+      background: #4338CA;
+    }
+  </style>
+</head>
+<body>
+  <button class="print-button no-print" onclick="window.print()">🖨️ 인쇄하기</button>
+  
+  <div class="header">
+    <h1>${category}</h1>
+    <p>학습 자료 | 총 ${data.length}개 문제 | 출력일: ${new Date().toLocaleDateString('ko-KR')}</p>
+  </div>
+  
+  ${data.map((q, index) => {
+    let questionText = q.question;
+    // 대화문 줄바꿈 처리
+    if (questionText.includes('A:') && questionText.includes('B:')) {
+      questionText = questionText.replace(' B:', '\nB:');
+    }
+    
+    return `
+    <div class="question-item">
+      <div class="question-number">문제 ${q.number || (index + 1)}</div>
+      <div class="question-text">${questionText}</div>
+      <div class="answer-hint-container">
+        <div class="answer-section">
+          <div class="answer-label">✓ 정답</div>
+          <div class="answer-text">${q.correct_word}</div>
+        </div>
+        ${q.meaning ? `
+        <div class="hint-section">
+          <div class="hint-label">💡 힌트</div>
+          <div class="hint-text">${q.meaning}</div>
+        </div>
+        ` : '<div></div>'}
+      </div>
+    </div>
+    `;
+  }).join('')}
+  
+  <div class="footer">
+    <p>Word Master - ${category} 학습 자료</p>
+  </div>
+</body>
+</html>
+      `);
+      printWindow.document.close();
+      
+      // 자동으로 인쇄 대화상자 표시 (선택사항)
+      setTimeout(() => {
+        printWindow.focus();
+      }, 500);
+    })
+    .catch(err => {
+      console.error('학습 자료 로드 실패:', err);
+      alert('학습 자료를 불러오는데 실패했습니다.');
+    });
 }
 
 // 다시 풀기

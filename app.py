@@ -101,6 +101,16 @@ class ExamQuestion(db.Model):
     answer = db.Column(db.String(1), nullable=False)
     created_at = db.Column(db.DateTime, nullable=True)
 
+# ✅ 학습 문제 모델 (빈칸 채우기)
+class ExamAnswer(db.Model):
+    __tablename__ = 'exam_answer'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    category = db.Column(db.String(10), nullable=True)
+    number = db.Column(db.Integer, nullable=True)
+    question = db.Column(db.String, nullable=True)
+    correct_word = db.Column(db.String(200), nullable=True)
+    meaning = db.Column(db.String(500), nullable=True)
+
 # ✅ 테스트 기록 모델
 class TestRecord(db.Model):
     __tablename__ = 'test_records_rows'
@@ -797,6 +807,22 @@ def exam_questions():
     category_list = [c.category for c in categories]
     return render_template('exam_questions.html', categories=category_list)
 
+# ✅ 학습 문제 페이지 (빈칸 채우기)
+@app.route('/study_questions')
+@login_required
+def study_questions():
+    """학습 문제 메인 페이지 (빈칸 채우기)"""
+    # 카테고리 목록 가져오기
+    categories = db.session.execute(text("""
+        SELECT DISTINCT category 
+        FROM exam_answer 
+        WHERE category IS NOT NULL
+        ORDER BY category
+    """)).fetchall()
+    
+    category_list = [c.category for c in categories]
+    return render_template('study_questions.html', categories=category_list)
+
 @app.route('/api/exam_questions', methods=['GET'])
 @login_required
 def api_get_exam_questions():
@@ -1036,6 +1062,207 @@ def api_delete_exam_question(question_id):
     """문제 삭제"""
     try:
         delete_query = text("DELETE FROM exam_questions WHERE id = :id")
+        db.session.execute(delete_query, {"id": question_id})
+        db.session.commit()
+        
+        return jsonify({"ok": True, "message": "문제가 삭제되었습니다."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+# ============================================
+# 학습 문제 (빈칸 채우기) API
+# ============================================
+
+@app.route('/api/study_questions', methods=['GET'])
+@login_required
+def api_get_study_questions():
+    """카테고리별 학습 문제 가져오기"""
+    category = request.args.get('category', '')
+    
+    if category:
+        query = text("""
+            SELECT id, category, number, question, correct_word, meaning
+            FROM exam_answer
+            WHERE category = :category
+            ORDER BY number
+        """)
+        result = db.session.execute(query, {"category": category}).fetchall()
+    else:
+        query = text("""
+            SELECT id, category, number, question, correct_word, meaning
+            FROM exam_answer
+            ORDER BY category, number
+        """)
+        result = db.session.execute(query).fetchall()
+    
+    questions = [{
+        "id": r.id,
+        "category": r.category,
+        "number": r.number,
+        "question": r.question,
+        "correct_word": r.correct_word,
+        "meaning": r.meaning
+    } for r in result]
+    
+    return jsonify(questions)
+
+@app.route('/api/study_questions', methods=['POST'])
+@login_required
+def api_add_study_question():
+    """학습 문제 추가"""
+    try:
+        data = request.get_json()
+        category = data.get('category', '').strip()
+        number = data.get('number')
+        question = data.get('question', '').strip()
+        correct_word = data.get('correct_word', '').strip()
+        meaning = data.get('meaning', '').strip()
+        
+        if not question or not correct_word:
+            return jsonify({"error": "문제와 정답은 필수입니다."}), 400
+        
+        insert_query = text("""
+            INSERT INTO exam_answer 
+                (category, number, question, correct_word, meaning)
+            VALUES 
+                (:category, :number, :question, :correct_word, :meaning)
+        """)
+        db.session.execute(insert_query, {
+            "category": category or None,
+            "number": number,
+            "question": question,
+            "correct_word": correct_word,
+            "meaning": meaning or None
+        })
+        db.session.commit()
+        
+        return jsonify({"ok": True, "message": "문제가 추가되었습니다."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route('/api/study_questions/bulk', methods=['POST'])
+@login_required
+def api_bulk_add_study_questions():
+    """학습 문제 일괄 추가"""
+    try:
+        data = request.get_json()
+        questions = data.get('questions', [])
+        
+        if not questions:
+            return jsonify({"error": "문제 데이터가 없습니다."}), 400
+        
+        insert_query = text("""
+            INSERT INTO exam_answer 
+                (category, number, question, correct_word, meaning)
+            VALUES 
+                (:category, :number, :question, :correct_word, :meaning)
+        """)
+        
+        success_count = 0
+        for q in questions:
+            try:
+                category = q.get('category', '').strip()
+                number_str = str(q.get('number', '')).strip()
+                number = int(number_str) if number_str and number_str.isdigit() else None
+                question = q.get('question', '').strip()
+                correct_word = q.get('correct_word', '').strip()
+                meaning = q.get('meaning', '').strip()
+                
+                if not question or not correct_word:
+                    continue
+                
+                db.session.execute(insert_query, {
+                    "category": category or None,
+                    "number": number,
+                    "question": question,
+                    "correct_word": correct_word,
+                    "meaning": meaning or None
+                })
+                success_count += 1
+            except Exception as e:
+                print(f"문제 추가 실패: {e}")
+                continue
+        
+        db.session.commit()
+        
+        return jsonify({"ok": True, "count": success_count, "message": f"{success_count}개의 문제가 추가되었습니다."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route('/api/study_questions/<int:question_id>', methods=['GET'])
+@login_required
+def api_get_study_question(question_id):
+    """특정 학습 문제 조회"""
+    try:
+        query = text("""
+            SELECT id, category, number, question, correct_word, meaning
+            FROM exam_answer
+            WHERE id = :id
+        """)
+        result = db.session.execute(query, {"id": question_id}).fetchone()
+        
+        if not result:
+            return jsonify({"error": "문제를 찾을 수 없습니다."}), 404
+        
+        return jsonify({
+            "id": result.id,
+            "category": result.category,
+            "number": result.number,
+            "question": result.question,
+            "correct_word": result.correct_word,
+            "meaning": result.meaning
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/study_questions/<int:question_id>', methods=['PUT'])
+@login_required
+def api_update_study_question(question_id):
+    """학습 문제 수정"""
+    try:
+        data = request.get_json()
+        category = data.get('category', '').strip()
+        number = data.get('number')
+        question = data.get('question', '').strip()
+        correct_word = data.get('correct_word', '').strip()
+        meaning = data.get('meaning', '').strip()
+        
+        if not question or not correct_word:
+            return jsonify({"error": "문제와 정답은 필수입니다."}), 400
+        
+        update_query = text("""
+            UPDATE exam_answer
+            SET category = :category,
+                number = :number,
+                question = :question,
+                correct_word = :correct_word,
+                meaning = :meaning
+            WHERE id = :id
+        """)
+        db.session.execute(update_query, {
+            "id": question_id,
+            "category": category or None,
+            "number": number,
+            "question": question,
+            "correct_word": correct_word,
+            "meaning": meaning or None
+        })
+        db.session.commit()
+        
+        return jsonify({"ok": True, "message": "문제가 수정되었습니다."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route('/api/study_questions/<int:question_id>', methods=['DELETE'])
+@login_required
+def api_delete_study_question(question_id):
+    """학습 문제 삭제"""
+    try:
+        delete_query = text("DELETE FROM exam_answer WHERE id = :id")
         db.session.execute(delete_query, {"id": question_id})
         db.session.commit()
         

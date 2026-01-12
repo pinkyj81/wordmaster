@@ -1,6 +1,6 @@
-Flask
-Flask_SQLAlchemy
-SQLAlchemy
-pyodbc
+flask
 gunicorn
-gTTS==2.5.4
+Flask-SQLAlchemy
+SQLAlchemy
+gTTS
+pyodbc
