@@ -264,7 +264,10 @@ def text_records():
 # ✅ 단어 테스트 페이지
 @app.route('/test/<text_id>')
 def word_test(text_id):
-    words = WordsRow.query.filter_by(text_id=text_id).all()
+    # 암기되지 않은 단어만 가져오기 (is_learned가 False 또는 NULL)
+    words = WordsRow.query.filter_by(text_id=text_id).filter(
+        or_(WordsRow.is_learned == False, WordsRow.is_learned.is_(None))
+    ).all()
     word_list = [{"word": w.word, "meaning": w.meaning, "text_title": w.text_title} for w in words]
     return render_template('test_modal.html', words=word_list)
 
@@ -310,7 +313,10 @@ def save_test_result():
 # ✅ 암기카드 페이지
 @app.route('/flashcards/<text_id>')
 def flashcards(text_id):
-    words = WordsRow.query.filter_by(text_id=text_id).all()
+    # 암기되지 않은 단어만 가져오기 (is_learned가 False 또는 NULL)
+    words = WordsRow.query.filter_by(text_id=text_id).filter(
+        or_(WordsRow.is_learned == False, WordsRow.is_learned.is_(None))
+    ).all()
     word_list = [{"word": w.word, "meaning": w.meaning, "text_title": w.text_title} for w in words]
     return render_template('flashcard_modal.html', words=word_list, text_id=text_id)
 
@@ -606,21 +612,29 @@ def upload_words():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-# ✅ 텍스트 제목 리스트 반환 (사용자 출처만)
+# ✅ 텍스트 제목 리스트 반환 (text_records_rows 기준)
 @app.route('/get_text_titles')
 @login_required
 def get_text_titles():
-    user_sources = get_user_sources()
+    is_admin = session.get('is_admin', False)
     
+    # 관리자는 항상 모든 텍스트를 볼 수 있음
+    if is_admin:
+        query = text("SELECT id, title, source FROM text_records_rows ORDER BY title ASC")
+        result = db.session.execute(query).fetchall()
+        return jsonify([{"id": r.id, "title": r.title, "source": r.source} for r in result])
+    
+    # 일반 사용자는 자신의 출처에 해당하는 텍스트만
+    user_sources = get_user_sources()
     if not user_sources:
         return jsonify([])
     
     source_params = {f'src{i}': src for i, src in enumerate(user_sources)}
     source_placeholders = ', '.join([f':src{i}' for i in range(len(user_sources))])
     
-    query = text(f"SELECT id, title FROM text_records_rows WHERE source IN ({source_placeholders}) ORDER BY title ASC")
+    query = text(f"SELECT id, title, source FROM text_records_rows WHERE source IN ({source_placeholders}) ORDER BY title ASC")
     result = db.session.execute(query, source_params).fetchall()
-    return jsonify([{"id": r.id, "title": r.title} for r in result])
+    return jsonify([{"id": r.id, "title": r.title, "source": r.source} for r in result])
 
 
 # ✅ 특정 텍스트의 단어 목록 반환
@@ -675,9 +689,18 @@ def delete_word(word_id):
 @app.route('/get_sources')
 @login_required
 def get_sources():
-    """현재 로그인한 사용자가 등록한 출처 목록만 반환"""
-    user_sources = get_user_sources()
-    return jsonify([{"source": src} for src in sorted(user_sources)])
+    """text_records_rows 테이블의 모든 출처 반환 (관리자는 전체, 일반 사용자는 본인 출처만)"""
+    is_admin = session.get('is_admin', False)
+    
+    if is_admin:
+        # 관리자는 모든 출처를 볼 수 있음
+        query = text("SELECT DISTINCT source FROM text_records_rows WHERE source IS NOT NULL ORDER BY source")
+        result = db.session.execute(query).fetchall()
+        return jsonify([{"source": r.source} for r in result])
+    else:
+        # 일반 사용자는 자신의 출처만
+        user_sources = get_user_sources()
+        return jsonify([{"source": src} for src in sorted(user_sources)])
 
 
 @app.route("/api/word/learned", methods=["POST"])

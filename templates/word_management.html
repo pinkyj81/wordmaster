@@ -8,9 +8,6 @@
   <label class="block mb-2 text-gray-700 font-medium">출처 선택</label>
   <select id="sourceSelector" class="border rounded px-3 py-2 w-full max-w-md" onchange="loadTitlesBySource()">
     <option value="">출처를 선택하세요</option>
-    {% for src in sources %}
-      <option value="{{ src }}">{{ src }}</option>
-    {% endfor %}
   </select>
 </div>
 
@@ -115,6 +112,40 @@ let isSelecting = false; // 선택 중인지 여부
 let selectionStart = null; // 선택 시작 셀
 let newWordCounter = 0; // 새 단어 임시 ID 카운터
 let autoScrollInterval = null; // 자동 스크롤 인터벌
+
+// 페이지 로드 시 출처 목록 로드
+document.addEventListener('DOMContentLoaded', function() {
+  loadSourceOptions();
+});
+
+// 출처 목록 로드 (text_records_rows 기준)
+function loadSourceOptions() {
+  fetch('/get_sources')
+    .then(res => res.json())
+    .then(sources => {
+      const select = document.getElementById('sourceSelector');
+      select.innerHTML = '<option value="">출처를 선택하세요</option>';
+      
+      if (sources.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '등록된 출처가 없습니다';
+        option.disabled = true;
+        select.appendChild(option);
+        return;
+      }
+      
+      sources.forEach(src => {
+        const option = document.createElement('option');
+        option.value = src.source;
+        option.textContent = src.source;
+        select.appendChild(option);
+      });
+    })
+    .catch(err => {
+      console.error('출처 목록 로드 실패:', err);
+    });
+}
 
 // 출처별 텍스트 목록 로드
 function loadTitlesBySource() {

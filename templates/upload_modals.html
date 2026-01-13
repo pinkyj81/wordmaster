@@ -152,10 +152,21 @@ function loadTextOptions() {
   fetch('/get_text_titles')
     .then(res => res.json())
     .then(texts => {
+      if (texts.length === 0) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '등록된 텍스트가 없습니다';
+        option.disabled = true;
+        select.appendChild(option);
+        console.warn('텍스트 목록이 비어있습니다. 먼저 텍스트를 업로드하세요.');
+        return;
+      }
+      
       texts.forEach(text => {
         const option = document.createElement('option');
         option.value = text.id;
-        option.textContent = text.title;
+        // 출처 정보도 함께 표시
+        option.textContent = text.source ? `[${text.source}] ${text.title}` : text.title;
         select.appendChild(option);
       });
     })
