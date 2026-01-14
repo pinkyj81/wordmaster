@@ -1,13 +1,20 @@
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from gtts import gTTS
 from functools import wraps
 import io
 import uuid
 import json
 import os
+
+# 한국 시간대 설정 (UTC+9)
+KST = timezone(timedelta(hours=9))
+
+def now_kst():
+    """한국 시간대 기준 현재 시간 반환"""
+    return datetime.now(KST).isoformat(timespec='seconds')
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # 세션 암호화 키
@@ -291,7 +298,8 @@ def save_test_result():
             INSERT INTO test_records_rows 
                 (id, test_name, total_questions, correct_answers, score, duration, test_words, completed_at, created_at, user_id)
             VALUES 
-                (:id, :test_name, :total_questions, :correct_answers, :score, :duration, :test_words, SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET(), :user_id)
+                (:id, :test_name, :total_questions, :correct_answers, :score, :duration, :test_words, 
+                 DATEADD(hour, 9, SYSUTCDATETIME()), DATEADD(hour, 9, SYSUTCDATETIME()), :user_id)
         """)
         db.session.execute(insert_query, {
             "id": record_id,
@@ -379,10 +387,12 @@ def learning_log():
             logs = db.session.execute(logs_query, {"q": f"%{q}%"}).fetchall()
 
             summary_query = text("""
-                SELECT test_name, COUNT(*) AS test_count
+                SELECT 
+                    LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1) AS test_name, 
+                    COUNT(*) AS test_count
                 FROM test_records_rows
                 WHERE test_name LIKE :q
-                GROUP BY test_name
+                GROUP BY LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1)
                 ORDER BY test_count DESC
             """)
             summary_rows = db.session.execute(summary_query, {"q": f"%{q}%"}).fetchall()
@@ -396,10 +406,12 @@ def learning_log():
             logs = db.session.execute(logs_query, {"q": f"%{q}%", "user_id": user_id}).fetchall()
 
             summary_query = text("""
-                SELECT test_name, COUNT(*) AS test_count
+                SELECT 
+                    LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1) AS test_name, 
+                    COUNT(*) AS test_count
                 FROM test_records_rows
                 WHERE test_name LIKE :q AND user_id = :user_id
-                GROUP BY test_name
+                GROUP BY LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1)
                 ORDER BY test_count DESC
             """)
             summary_rows = db.session.execute(summary_query, {"q": f"%{q}%", "user_id": user_id}).fetchall()
@@ -413,9 +425,11 @@ def learning_log():
             logs = db.session.execute(logs_query).fetchall()
 
             summary_query = text("""
-                SELECT test_name, COUNT(*) AS test_count
+                SELECT 
+                    LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1) AS test_name, 
+                    COUNT(*) AS test_count
                 FROM test_records_rows
-                GROUP BY test_name
+                GROUP BY LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1)
                 ORDER BY test_count DESC
             """)
             summary_rows = db.session.execute(summary_query).fetchall()
@@ -429,10 +443,12 @@ def learning_log():
             logs = db.session.execute(logs_query, {"user_id": user_id}).fetchall()
 
             summary_query = text("""
-                SELECT test_name, COUNT(*) AS test_count
+                SELECT 
+                    LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1) AS test_name, 
+                    COUNT(*) AS test_count
                 FROM test_records_rows
                 WHERE user_id = :user_id
-                GROUP BY test_name
+                GROUP BY LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1)
                 ORDER BY test_count DESC
             """)
             summary_rows = db.session.execute(summary_query, {"user_id": user_id}).fetchall()
@@ -521,7 +537,7 @@ def update_words():
                     example = :example,
                     exam_korean = :exam_korean,
                     is_learned = :is_learned,
-                    updated_at = SYSDATETIMEOFFSET()
+                    updated_at = DATEADD(hour, 9, SYSUTCDATETIME())
                 WHERE id = :id
             """)
             db.session.execute(update_query, {
@@ -552,7 +568,7 @@ def upload_text():
 
     query = text("""
         INSERT INTO text_records_rows (id, title, content, source, word_count, created_at, updated_at)
-        VALUES (:id, :title, :content, :source, 0, SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET())
+        VALUES (:id, :title, :content, :source, 0, DATEADD(hour, 9, SYSUTCDATETIME()), DATEADD(hour, 9, SYSUTCDATETIME()))
     """)
     db.session.execute(query, {"id": record_id, "title": title, "content": content, "source": source})
     db.session.commit()
@@ -581,7 +597,7 @@ def upload_words():
         result = db.session.execute(last_id_query).fetchone()
         current_max_id = result.max_id or 0  # 없으면 0부터 시작
 
-        now = datetime.now().isoformat(timespec='seconds')
+        now = now_kst()
 
         for w in words:
             current_max_id += 1  # +1 증가
@@ -672,7 +688,7 @@ def update_word():
         SET word = :word,
             meaning = :meaning,
             example = :example,
-            updated_at = SYSDATETIMEOFFSET()
+            updated_at = DATEADD(hour, 9, SYSUTCDATETIME())
         WHERE id = :id
     """)
     db.session.execute(query, {"id": word_id, "word": word, "meaning": meaning, "example": example})
@@ -713,7 +729,7 @@ def api_word_learned():
         db.session.execute(text("""
             UPDATE words_rows
             SET is_learned = :is_learned,
-                updated_at = SYSDATETIMEOFFSET()
+                updated_at = DATEADD(hour, 9, SYSUTCDATETIME())
             WHERE id = :word_id
         """), {"is_learned": is_learned, "word_id": word_id})
 
@@ -780,7 +796,7 @@ def api_add_word():
     # new id
     last = db.session.execute(text("SELECT MAX(CAST(id AS INT)) AS max_id FROM words_rows")).fetchone()
     new_id = str((last.max_id or 0) + 1)
-    now = datetime.now().isoformat(timespec='seconds')
+    now = now_kst()
 
     insert_q = text("""
         INSERT INTO words_rows
@@ -927,7 +943,7 @@ def api_add_exam_question():
             INSERT INTO exam_questions 
                 (category, number, question, choice_a, choice_b, choice_c, choice_d, answer, created_at)
             VALUES 
-                (:category, :number, :question, :choice_a, :choice_b, :choice_c, :choice_d, :answer, SYSDATETIMEOFFSET())
+                (:category, :number, :question, :choice_a, :choice_b, :choice_c, :choice_d, :answer, DATEADD(hour, 9, SYSUTCDATETIME()))
         """)
         db.session.execute(insert_query, {
             "category": category or None,
@@ -961,7 +977,7 @@ def api_bulk_add_exam_questions():
             INSERT INTO exam_questions 
                 (category, number, question, choice_a, choice_b, choice_c, choice_d, answer, created_at)
             VALUES 
-                (:category, :number, :question, :choice_a, :choice_b, :choice_c, :choice_d, :answer, SYSDATETIMEOFFSET())
+                (:category, :number, :question, :choice_a, :choice_b, :choice_c, :choice_d, :answer, DATEADD(hour, 9, SYSUTCDATETIME()))
         """)
         
         success_count = 0

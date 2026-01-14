@@ -64,7 +64,7 @@
     <div id="questionContainer" class="mb-6">
       <div class="bg-blue-50 border-l-4 border-blue-600 p-6 mb-6 rounded">
         <p class="text-sm text-blue-800 font-semibold mb-2">문제 <span id="questionNumber"></span></p>
-        <p id="questionText" class="text-lg text-gray-800 font-medium leading-relaxed whitespace-pre-line"></p>
+        <p id="questionText" class="text-lg text-gray-800 font-medium leading-relaxed" style="white-space: pre-line;"></p>
       </div>
 
       <!-- 보기 (시험 모드) -->
@@ -186,8 +186,12 @@
         <thead>
           <tr class="bg-gradient-to-r from-purple-100 to-indigo-100">
             <th class="border px-3 py-2 text-center font-semibold text-gray-700" style="width: 60px;">번호</th>
-            <th class="border px-3 py-2 text-left font-semibold text-gray-700" style="width: 120px;">카테고리</th>
+            <th class="border px-3 py-2 text-left font-semibold text-gray-700" style="width: 100px;">카테고리</th>
             <th class="border px-3 py-2 text-left font-semibold text-gray-700">문제</th>
+            <th class="border px-2 py-2 text-left font-semibold text-gray-700" style="width: 80px;">A</th>
+            <th class="border px-2 py-2 text-left font-semibold text-gray-700" style="width: 80px;">B</th>
+            <th class="border px-2 py-2 text-left font-semibold text-gray-700" style="width: 80px;">C</th>
+            <th class="border px-2 py-2 text-left font-semibold text-gray-700" style="width: 80px;">D</th>
             <th class="border px-3 py-2 text-center font-semibold text-gray-700" style="width: 120px;">작업</th>
           </tr>
         </thead>
@@ -414,12 +418,14 @@ function displayStudyQuestion() {
   // 문제 번호
   document.getElementById('currentQuestionNum').textContent = currentQuestionIndex + 1;
   document.getElementById('totalQuestions').textContent = questions.length;
-  document.getElementById('questionNumber').textContent = currentQuestionIndex + 1;
+  // 실제 문제 번호 표시 (DB의 number 값)
+  document.getElementById('questionNumber').textContent = question.number || (currentQuestionIndex + 1);
   
   // 문제 텍스트 (대화문 줄바꿈 처리)
   let questionText = question.question;
-  if (questionText.includes('A:') && questionText.includes('B:')) {
-    questionText = questionText.replace(' B:', '\nB:');
+  // a:, b: 형식의 대화문 줄바꿈 처리
+  if (questionText.toLowerCase().includes(' a:') || questionText.toLowerCase().includes(' b:')) {
+    questionText = questionText.replace(/\s+(a:|A:)/g, '\n$1').replace(/\s+(b:|B:)/g, '\n$1');
   }
   document.getElementById('questionText').textContent = questionText;
   
@@ -609,10 +615,16 @@ function displayQuestion() {
   // 문제 번호
   document.getElementById('currentQuestionNum').textContent = currentQuestionIndex + 1;
   document.getElementById('totalQuestions').textContent = questions.length;
-  document.getElementById('questionNumber').textContent = currentQuestionIndex + 1;
+  // 실제 문제 번호 표시 (DB의 number 값)
+  document.getElementById('questionNumber').textContent = question.number || (currentQuestionIndex + 1);
   
-  // 문제 텍스트
-  document.getElementById('questionText').textContent = question.question;
+  // 문제 텍스트 (대화문 줄바꿈 처리)
+  let questionText = question.question;
+  // a:, b: 형식의 대화문 줄바꿈 처리
+  if (questionText.toLowerCase().includes(' a:') || questionText.toLowerCase().includes(' b:')) {
+    questionText = questionText.replace(/\s+(a:|A:)/g, '\n$1').replace(/\s+(b:|B:)/g, '\n$1');
+  }
+  document.getElementById('questionText').textContent = questionText;
   
   // UI 전환
   document.getElementById('choicesContainer').classList.remove('hidden');
@@ -714,11 +726,21 @@ function submitExam() {
     if (userAnswer && userAnswer.toUpperCase() === correctAnswer.toUpperCase()) {
       correctCount++;
     } else {
+      // 보기 텍스트 가져오기
+      const choiceMap = {
+        'A': q.choice_a,
+        'B': q.choice_b,
+        'C': q.choice_c,
+        'D': q.choice_d
+      };
+      
       wrongAnswers.push({
         number: index + 1,
         question: q.question,
         userAnswer: userAnswer || '미응답',
-        correctAnswer: correctAnswer
+        userAnswerText: userAnswer ? choiceMap[userAnswer.toUpperCase()] : '',
+        correctAnswer: correctAnswer,
+        correctAnswerText: choiceMap[correctAnswer.toUpperCase()]
       });
     }
   });
@@ -757,10 +779,23 @@ function showResult(total, correct, score, wrongAnswers) {
     wrongAnswers.forEach(w => {
       const wrongDiv = document.createElement('div');
       wrongDiv.className = 'bg-red-50 border-l-4 border-red-500 p-3 mb-2 text-sm';
+      
+      // 내 답안 표시 (보기 포함)
+      let myAnswerText = w.userAnswer;
+      if (w.userAnswerText) {
+        myAnswerText += ` (${w.userAnswerText})`;
+      }
+      
+      // 정답 표시 (보기 포함)
+      let correctText = w.correctAnswer;
+      if (w.correctAnswerText) {
+        correctText += ` (${w.correctAnswerText})`;
+      }
+      
       wrongDiv.innerHTML = `
         <p class="font-semibold text-red-800">문제 ${w.number}</p>
         <p class="text-gray-700 mb-1">${w.question}</p>
-        <p class="text-sm"><span class="text-red-600">내 답: ${w.userAnswer}</span> / <span class="text-green-600">정답: ${w.correctAnswer}</span></p>
+        <p class="text-sm"><span class="text-red-600">내 답: ${myAnswerText}</span> / <span class="text-green-600">정답: ${correctText}</span></p>
       `;
       wrongContainer.appendChild(wrongDiv);
     });
@@ -1037,7 +1072,7 @@ function loadQuestionList() {
       tbody.innerHTML = '';
       
       if (data.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="border px-4 py-3 text-center text-gray-500">등록된 문제가 없습니다.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="border px-4 py-3 text-center text-gray-500">등록된 문제가 없습니다.</td></tr>';
         return;
       }
       
@@ -1048,6 +1083,10 @@ function loadQuestionList() {
           <td class="border px-3 py-2 text-center">${q.number || '-'}</td>
           <td class="border px-3 py-2">${q.category || '-'}</td>
           <td class="border px-3 py-2">${q.question}</td>
+          <td class="border px-2 py-2 text-xs">${q.choice_a || '-'}</td>
+          <td class="border px-2 py-2 text-xs">${q.choice_b || '-'}</td>
+          <td class="border px-2 py-2 text-xs">${q.choice_c || '-'}</td>
+          <td class="border px-2 py-2 text-xs">${q.choice_d || '-'}</td>
           <td class="border px-3 py-2 text-center">
             <button onclick="editQuestion(${q.id})" class="bg-blue-500 text-white px-2 py-1 rounded text-xs mr-1 hover:bg-blue-600">수정</button>
             <button onclick="deleteQuestion(${q.id})" class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600">삭제</button>
