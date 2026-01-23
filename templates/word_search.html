@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}단어 찾기{% endblock %}
+
+{% block content %}
+<style>
+    .search-container {
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        margin-bottom: 30px;
+    }
+    .search-box {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+    .search-box input[type="text"] {
+        flex: 1;
+        padding: 12px 15px;
+        font-size: 16px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+    }
+    .search-box select {
+        padding: 12px 15px;
+        font-size: 16px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        background: white;
+    }
+    .search-box button {
+        padding: 12px 30px;
+        font-size: 16px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+    }
+    .search-box button:hover {
+        background: #0056b3;
+    }
+    .result-count {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 15px;
+    }
+    .word-card {
+        background: white;
+        padding: 20px;
+        margin-bottom: 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        transition: all 0.3s;
+    }
+    .word-card:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        transform: translateY(-2px);
+    }
+    .word-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    .word-title {
+        font-size: 24px;
+        font-weight: 700;
+        color: #2c3e50;
+    }
+    .word-badges {
+        display: flex;
+        gap: 8px;
+    }
+    .badge {
+        padding: 5px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .badge-learned {
+        background: #d4edda;
+        color: #155724;
+    }
+    .badge-text {
+        background: #e7f3ff;
+        color: #004085;
+    }
+    .word-meaning {
+        font-size: 16px;
+        color: #555;
+        margin-bottom: 8px;
+        line-height: 1.6;
+    }
+    .word-example {
+        font-size: 14px;
+        color: #666;
+        font-style: italic;
+        padding: 10px;
+        background: #f8f9fa;
+        border-left: 3px solid #007bff;
+        margin-top: 10px;
+    }
+    .word-korean {
+        font-size: 14px;
+        color: #28a745;
+        margin-top: 5px;
+    }
+    .no-results {
+        text-align: center;
+        padding: 60px 20px;
+        color: #999;
+    }
+    .no-results i {
+        font-size: 48px;
+        margin-bottom: 15px;
+    }
+    .speaker-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 20px;
+        color: #007bff;
+        padding: 5px 10px;
+        margin-left: 10px;
+    }
+    .speaker-btn:hover {
+        color: #0056b3;
+    }
+</style>
+
+<div class="container" style="max-width: 900px; margin: 0 auto; padding: 20px;">
+    <h1 style="margin-bottom: 30px; color: #2c3e50;">
+        🔍 단어 찾기
+    </h1>
+
+    <div class="search-container">
+        <form method="get" action="/word_search" class="search-box">
+            <input type="text" 
+                   name="q" 
+                   placeholder="검색어를 입력하세요..." 
+                   value="{{ search_query }}"
+                   autofocus>
+            
+            <select name="type">
+                <option value="word" {% if search_type == 'word' %}selected{% endif %}>단어</option>
+                <option value="meaning" {% if search_type == 'meaning' %}selected{% endif %}>뜻</option>
+                <option value="all" {% if search_type == 'all' %}selected{% endif %}>전체</option>
+            </select>
+            
+            <button type="submit">검색</button>
+        </form>
+
+        {% if search_query %}
+        <div class="result-count">
+            <strong>"{{ search_query }}"</strong> 검색 결과: <strong>{{ words|length }}개</strong>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if words %}
+        {% for word in words %}
+        <div class="word-card">
+            <div class="word-header">
+                <div>
+                    <span class="word-title">{{ word.word }}</span>
+                    <button class="speaker-btn" onclick="playSound('{{ word.word }}')">🔊</button>
+                </div>
+                <div class="word-badges">
+                    {% if word.is_learned %}
+                    <span class="badge badge-learned">✓ 암기완료</span>
+                    {% endif %}
+                    {% if word.text_title %}
+                    <span class="badge badge-text">{{ word.text_title }}</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="word-meaning">
+                <strong>뜻:</strong> {{ word.meaning or '뜻 없음' }}
+            </div>
+
+            {% if word.exam_korean %}
+            <div class="word-korean">
+                <strong>예문 (한글):</strong> {{ word.exam_korean }}
+            </div>
+            {% endif %}
+
+            {% if word.example %}
+            <div class="word-example">
+                {{ word.example }}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% else %}
+        {% if search_query %}
+        <div class="no-results">
+            <div><i>🔍</i></div>
+            <h3>검색 결과가 없습니다</h3>
+            <p>"{{ search_query }}"와 일치하는 단어를 찾을 수 없습니다.</p>
+        </div>
+        {% else %}
+        <div class="no-results">
+            <div><i>📚</i></div>
+            <h3>검색어를 입력하세요</h3>
+            <p>단어 또는 뜻을 검색할 수 있습니다.</p>
+        </div>
+        {% endif %}
+    {% endif %}
+</div>
+
+<script>
+function playSound(word) {
+    const audio = new Audio(`/tts/${encodeURIComponent(word)}`);
+    audio.play().catch(err => {
+        console.error('음성 재생 실패:', err);
+        alert('음성 재생에 실패했습니다.');
+    });
+}
+</script>
+{% endblock %}

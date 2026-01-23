@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="text-3xl font-bold mb-6 text-gray-800">📝 스펠링 테스트</h2>
+
+<div class="mb-6">
+  <p class="text-gray-600 mb-4">한글 뜻을 보고 영어 단어를 스펠링하세요. 첫 글자는 힌트로 제공됩니다.</p>
+  
+  <!-- 텍스트 선택 -->
+  <div class="mb-4">
+    <label class="block mb-2 text-gray-700 font-medium">텍스트 선택</label>
+    <select id="textSelector" class="border rounded px-3 py-2 w-full max-w-md">
+      <option value="">텍스트를 선택하세요</option>
+      {% for text in texts %}
+        <option value="{{ text.id }}">{{ text.title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- 시작 버튼 -->
+  <button onclick="startSpellingTest()" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition font-semibold">
+    시작하기
+  </button>
+</div>
+
+<!-- 테스트 영역 -->
+<div id="testArea" class="hidden">
+  <div class="bg-white rounded-lg shadow-lg p-8 max-w-2xl mx-auto">
+    <!-- 진행 상황 -->
+    <div class="mb-6">
+      <div class="flex justify-between text-sm text-gray-600 mb-2">
+        <span>문제 <span id="currentNum">1</span> / <span id="totalNum">0</span></span>
+        <span>정답: <span id="correctCount" class="text-green-600 font-bold">0</span> / 오답: <span id="wrongCount" class="text-red-600 font-bold">0</span></span>
+      </div>
+      <div class="w-full bg-gray-200 rounded-full h-2">
+        <div id="progressBar" class="bg-blue-600 h-2 rounded-full transition-all" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <!-- 문제 -->
+    <div class="text-center mb-8">
+      <p class="text-gray-500 text-sm mb-2">뜻</p>
+      <h3 id="meaningText" class="text-3xl font-bold text-gray-800 mb-6">사과</h3>
+      
+      <!-- 스펠링 입력 칸 -->
+      <div id="letterBoxes" class="flex justify-center gap-2 mb-4">
+        <!-- JavaScript로 동적 생성 -->
+      </div>
+      
+      <p id="feedbackMsg" class="text-sm min-h-6"></p>
+    </div>
+
+    <!-- 버튼 -->
+    <div class="flex justify-center gap-3">
+      <button onclick="checkAnswer()" id="submitBtn" class="bg-green-600 text-white px-8 py-3 rounded-lg hover:bg-green-700 transition font-semibold">
+        확인
+      </button>
+      <button onclick="skipQuestion()" class="bg-yellow-600 text-white px-8 py-3 rounded-lg hover:bg-yellow-700 transition font-semibold">
+        건너뛰기
+      </button>
+      <button onclick="endTest()" class="bg-red-600 text-white px-8 py-3 rounded-lg hover:bg-red-700 transition font-semibold">
+        종료
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 결과 모달 -->
+<div id="resultModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-2xl w-[500px] p-8">
+    <h3 class="text-2xl font-bold text-gray-800 mb-6 text-center">테스트 결과</h3>
+    
+    <div class="space-y-4 mb-6">
+      <div class="flex justify-between text-lg">
+        <span>총 문제:</span>
+        <span class="font-bold" id="resultTotal">0</span>
+      </div>
+      <div class="flex justify-between text-lg">
+        <span>정답:</span>
+        <span class="font-bold text-green-600" id="resultCorrect">0</span>
+      </div>
+      <div class="flex justify-between text-lg">
+        <span>오답:</span>
+        <span class="font-bold text-red-600" id="resultWrong">0</span>
+      </div>
+      <div class="flex justify-between text-2xl border-t pt-4">
+        <span>점수:</span>
+        <span class="font-bold text-blue-600" id="resultScore">0</span>
+      </div>
+    </div>
+
+    <!-- 오답 리스트 -->
+    <div id="wrongAnswersSection" class="mb-6 hidden">
+      <h4 class="font-bold text-gray-700 mb-3">틀린 문제</h4>
+      <div id="wrongAnswersList" class="space-y-2 max-h-60 overflow-y-auto">
+        <!-- JavaScript로 동적 생성 -->
+      </div>
+    </div>
+
+    <div class="flex gap-3">
+      <button onclick="closeResultModal()" class="flex-1 bg-gray-500 text-white px-6 py-3 rounded-lg hover:bg-gray-600 transition font-semibold">
+        닫기
+      </button>
+      <button onclick="restartTest()" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition font-semibold">
+        다시 시작
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+let words = [];
+let currentIndex = 0;
+let correctCount = 0;
+let wrongCount = 0;
+let currentAnswer = '';
+let wrongAnswers = [];
+let startTime = null;
+let testTextId = '';
+let testTextTitle = '';
+let resultSaved = false;
+
+async function startSpellingTest() {
+  const textId = document.getElementById('textSelector').value;
+  
+  if (!textId) {
+    alert('텍스트를 선택하세요.');
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/spelling_test/words/${textId}`);
+    const data = await response.json();
+    
+    // API 응답 구조 변경 반영
+    words = data.words || [];
+    const totalUnlearned = data.total_unlearned || 0;
+    const selectedCount = data.selected_count || 0;
+    
+    if (words.length === 0) {
+      alert('암기하지 않은 단어가 없습니다. 모든 단어를 다 외웠네요!');
+      return;
+    }
+
+    // 단어 개수 알림
+    if (totalUnlearned <= 10) {
+      alert(`암기하지 않은 단어가 총 ${totalUnlearned}개입니다.\n모든 단어가 출제됩니다.`);
+    } else {
+      console.log(`암기하지 않은 단어 ${totalUnlearned}개 중 랜덤으로 ${selectedCount}개 선택됨`);
+    }
+
+    // 이미 랜덤으로 선택되어 왔으므로 추가 섞기 불필요
+    
+    // 테스트 정보 저장
+    testTextId = textId;
+    const selector = document.getElementById('textSelector');
+    testTextTitle = selector.options[selector.selectedIndex].text;
+    startTime = Date.now();
+    resultSaved = false;
+    
+    currentIndex = 0;
+    correctCount = 0;
+    wrongCount = 0;
+    wrongAnswers = [];
+    
+    document.getElementById('testArea').classList.remove('hidden');
+    document.getElementById('totalNum').textContent = words.length;
+    
+    showQuestion();
+  } catch (error) {
+    console.error('단어 로드 실패:', error);
+    alert('단어를 불러오는데 실패했습니다.');
+  }
+}
+
+function showQuestion() {
+  if (currentIndex >= words.length) {
+    showResult();
+    return;
+  }
+
+  const word = words[currentIndex];
+  currentAnswer = word.word;
+  
+  // 진행 상황 업데이트
+  document.getElementById('currentNum').textContent = currentIndex + 1;
+  document.getElementById('correctCount').textContent = correctCount;
+  document.getElementById('wrongCount').textContent = wrongCount;
+  
+  const progress = ((currentIndex) / words.length) * 100;
+  document.getElementById('progressBar').style.width = progress + '%';
+  
+  // 뜻 표시
+  document.getElementById('meaningText').textContent = word.meaning;
+  
+  // 입력 칸 생성 (첫 글자는 힌트로 표시)
+  const letterBoxes = document.getElementById('letterBoxes');
+  letterBoxes.innerHTML = '';
+  
+  for (let i = 0; i < word.length; i++) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 1;
+    input.className = 'w-12 h-12 text-center text-2xl font-bold border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none uppercase';
+    input.dataset.index = i;
+    
+    if (i === 0) {
+      // 첫 글자는 힌트로 표시
+      input.value = word.word[0];
+      input.readOnly = true;
+      input.className += ' bg-blue-100 text-blue-600';
+    } else {
+      // 다음 칸으로 자동 이동
+      input.addEventListener('input', function(e) {
+        if (e.target.value) {
+          const nextInput = document.querySelector(`input[data-index="${parseInt(e.target.dataset.index) + 1}"]`);
+          if (nextInput) {
+            nextInput.focus();
+          }
+        }
+      });
+      
+      // Backspace로 이전 칸으로 이동
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Backspace' && !e.target.value) {
+          const prevInput = document.querySelector(`input[data-index="${parseInt(e.target.dataset.index) - 1}"]`);
+          if (prevInput && !prevInput.readOnly) {
+            prevInput.focus();
+          }
+        } else if (e.key === 'Enter') {
+          checkAnswer();
+        }
+      });
+    }
+    
+    letterBoxes.appendChild(input);
+  }
+  
+  // 첫 입력 칸에 포커스 (두 번째 칸)
+  const firstEditableInput = letterBoxes.querySelector('input:not([readonly])');
+  if (firstEditableInput) {
+    setTimeout(() => firstEditableInput.focus(), 100);
+  }
+  
+  document.getElementById('feedbackMsg').textContent = '';
+  document.getElementById('feedbackMsg').className = 'text-sm min-h-6';
+}
+
+function checkAnswer() {
+  const inputs = document.querySelectorAll('#letterBoxes input');
+  let userAnswer = '';
+  
+  inputs.forEach(input => {
+    userAnswer += input.value.toLowerCase();
+  });
+  
+  const feedbackMsg = document.getElementById('feedbackMsg');
+  
+  if (userAnswer === currentAnswer.toLowerCase()) {
+    correctCount++;
+    feedbackMsg.textContent = '✅ 정답입니다!';
+    feedbackMsg.className = 'text-sm min-h-6 text-green-600 font-bold';
+    
+    // 입력 칸 초록색으로
+    inputs.forEach(input => {
+      input.className = input.className.replace('border-gray-300', 'border-green-500');
+    });
+    
+    setTimeout(() => {
+      currentIndex++;
+      showQuestion();
+    }, 1000);
+  } else {
+    wrongCount++;
+    wrongAnswers.push({
+      meaning: words[currentIndex].meaning,
+      correct: currentAnswer,
+      user: userAnswer
+    });
+    
+    feedbackMsg.textContent = `❌ 오답입니다. 정답: ${currentAnswer}`;
+    feedbackMsg.className = 'text-sm min-h-6 text-red-600 font-bold';
+    
+    // 입력 칸 빨간색으로
+    inputs.forEach(input => {
+      input.className = input.className.replace('border-gray-300', 'border-red-500');
+    });
+    
+    setTimeout(() => {
+      currentIndex++;
+      showQuestion();
+    }, 2000);
+  }
+}
+
+function skipQuestion() {
+  wrongAnswers.push({
+    meaning: words[currentIndex].meaning,
+    correct: currentAnswer,
+    user: '(건너뜀)'
+  });
+  
+  currentIndex++;
+  showQuestion();
+}
+
+function endTest() {
+  if (confirm('테스트를 종료하시겠습니까?')) {
+    showResult();
+  }
+}
+
+async function showResult() {
+  const total = correctCount + wrongCount;
+  const score = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+  
+  document.getElementById('resultTotal').textContent = total;
+  document.getElementById('resultCorrect').textContent = correctCount;
+  document.getElementById('resultWrong').textContent = wrongCount;
+  document.getElementById('resultScore').textContent = score + '점';
+  
+  // 오답 리스트
+  if (wrongAnswers.length > 0) {
+    document.getElementById('wrongAnswersSection').classList.remove('hidden');
+    const wrongList = document.getElementById('wrongAnswersList');
+    wrongList.innerHTML = '';
+    
+    wrongAnswers.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'p-3 bg-red-50 rounded-lg';
+      div.innerHTML = `
+        <div class="font-bold text-gray-800">${item.meaning}</div>
+        <div class="text-sm text-gray-600">정답: <span class="text-green-600 font-bold">${item.correct}</span></div>
+        <div class="text-sm text-gray-600">입력: <span class="text-red-600 font-bold">${item.user}</span></div>
+      `;
+      wrongList.appendChild(div);
+    });
+  } else {
+    document.getElementById('wrongAnswersSection').classList.add('hidden');
+  }
+  
+  // 결과 저장 (중복 방지)
+  if (!resultSaved) {
+    await saveTestResult(total, score);
+    resultSaved = true;
+  }
+  
+  document.getElementById('resultModal').classList.remove('hidden');
+  document.getElementById('resultModal').classList.add('flex');
+}
+
+async function saveTestResult(total, score) {
+  const duration = Math.floor((Date.now() - startTime) / 1000); // 초 단위
+  
+  const data = {
+    test_name: `${testTextId} 스펠링 테스트 - ${testTextTitle}`,
+    total_questions: total,
+    correct_answers: correctCount,
+    score: score,
+    duration: duration,
+    wrong_words: wrongAnswers
+  };
+  
+  try {
+    const response = await fetch('/save_test_result', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    
+    if (response.ok) {
+      console.log('테스트 결과 저장 완료');
+    } else {
+      console.error('결과 저장 실패');
+    }
+  } catch (error) {
+    console.error('결과 저장 중 오류:', error);
+  }
+}
+
+function closeResultModal() {
+  document.getElementById('resultModal').classList.add('hidden');
+  document.getElementById('resultModal').classList.remove('flex');
+  document.getElementById('testArea').classList.add('hidden');
+}
+
+function restartTest() {
+  closeResultModal();
+  startSpellingTest();
+}
+</script>
+
+{% endblock %}

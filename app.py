@@ -483,6 +483,53 @@ def learning_log():
     return render_template('learning_log.html', logs=formatted_logs, summary=summary, q=q, test_names=test_names, is_admin=is_admin, view_all=view_all)
 
 
+# ✅ 단어 찾기 페이지
+@app.route('/word_search')
+@login_required
+def word_search():
+    search_query = request.args.get('q', '').strip()
+    search_type = request.args.get('type', 'word')  # word, meaning, all
+    
+    if not search_query:
+        return render_template('word_search.html', words=[], search_query='', search_type=search_type)
+    
+    # 검색 조건 생성
+    if search_type == 'word':
+        sql_query = text("""
+            SELECT id, word, meaning, exam_korean, example, is_learned, 
+                   text_id, text_title, created_at
+            FROM words_rows
+            WHERE word LIKE :query
+            ORDER BY word ASC
+        """)
+        params = {"query": f"%{search_query}%"}
+    elif search_type == 'meaning':
+        sql_query = text("""
+            SELECT id, word, meaning, exam_korean, example, is_learned, 
+                   text_id, text_title, created_at
+            FROM words_rows
+            WHERE meaning LIKE :query
+            ORDER BY word ASC
+        """)
+        params = {"query": f"%{search_query}%"}
+    else:  # all
+        sql_query = text("""
+            SELECT id, word, meaning, exam_korean, example, is_learned, 
+                   text_id, text_title, created_at
+            FROM words_rows
+            WHERE word LIKE :query OR meaning LIKE :query
+            ORDER BY word ASC
+        """)
+        params = {"query": f"%{search_query}%"}
+    
+    results = db.session.execute(sql_query, params).fetchall()
+    
+    return render_template('word_search.html', 
+                          words=results, 
+                          search_query=search_query, 
+                          search_type=search_type)
+
+
 # ✅ 발음 듣기 (미국식)
 @app.route('/tts/<word>')
 def tts(word):
@@ -1427,6 +1474,71 @@ def debug_test_records():
         "current_session_user_name": session.get('user_name'),
         "is_admin": session.get('is_admin'),
         "recent_records": result
+    })
+
+# ✅ 스펠링 테스트 페이지
+@app.route('/spelling_test')
+@login_required
+def spelling_test():
+    """스펠링 테스트 페이지 - 한글 뜻을 보고 영어 스펠링 입력"""
+    # 사용자가 등록한 출처 목록
+    user_sources = get_user_sources()
+    
+    if not user_sources:
+        return render_template('spelling_test.html', texts=[])
+    
+    # IN 절을 위한 파라미터 생성
+    source_params = {f'src{i}': src for i, src in enumerate(user_sources)}
+    source_placeholders = ', '.join([f':src{i}' for i in range(len(user_sources))])
+    
+    query = text(f"""
+        SELECT id, title
+        FROM text_records_rows
+        WHERE source IN ({source_placeholders})
+        ORDER BY uploaded_at DESC
+    """)
+    
+    texts = db.session.execute(query, source_params).fetchall()
+    text_list = [{"id": t.id, "title": t.title} for t in texts]
+    
+    return render_template('spelling_test.html', texts=text_list)
+
+# ✅ 스펠링 테스트용 단어 가져오기 API
+@app.route('/api/spelling_test/words/<text_id>')
+@login_required
+def get_spelling_test_words(text_id):
+    """텍스트 ID로 암기하지 않은 단어 중 랜덤 10개 가져오기"""
+    # 암기하지 않은 단어 총 개수 확인
+    count_query = text("""
+        SELECT COUNT(*) as total
+        FROM words_rows
+        WHERE text_id = :text_id 
+        AND (is_learned IS NULL OR is_learned = 0)
+    """)
+    total_count = db.session.execute(count_query, {"text_id": text_id}).fetchone().total
+    
+    # 랜덤으로 최대 10개 가져오기
+    query = text("""
+        SELECT TOP 10 id, word, meaning
+        FROM words_rows
+        WHERE text_id = :text_id 
+        AND (is_learned IS NULL OR is_learned = 0)
+        ORDER BY NEWID()
+    """)
+    
+    results = db.session.execute(query, {"text_id": text_id}).fetchall()
+    
+    word_list = [{
+        "id": r.id,
+        "word": r.word.strip().lower(),  # 소문자로 통일
+        "meaning": r.meaning,
+        "length": len(r.word.strip())
+    } for r in results if r.word and r.word.strip()]
+    
+    return jsonify({
+        "words": word_list,
+        "total_unlearned": total_count,
+        "selected_count": len(word_list)
     })
 
 # ✅ 서버 실행
