@@ -825,16 +825,18 @@ def update_word():
     word = data.get('word')
     meaning = data.get('meaning')
     example = data.get('example', '')
+    is_learned = data.get('is_learned', False)
 
     query = text("""
         UPDATE words_rows
         SET word = :word,
             meaning = :meaning,
             example = :example,
+            is_learned = :is_learned,
             updated_at = DATEADD(hour, 9, SYSUTCDATETIME())
         WHERE id = :id
     """)
-    db.session.execute(query, {"id": word_id, "word": word, "meaning": meaning, "example": example})
+    db.session.execute(query, {"id": word_id, "word": word, "meaning": meaning, "example": example, "is_learned": is_learned})
     db.session.commit()
     return jsonify({"message": "단어가 수정되었습니다."})
 # ✅ 단어 삭제
