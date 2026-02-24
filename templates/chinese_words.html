@@ -1,0 +1,423 @@
+{% extends "base.html" %}
+
+{% block title %}한자 학습{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="fas fa-language"></i> 한자 학습
+        </h2>
+        <div>
+            <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addChineseModal">
+                <i class="fas fa-plus"></i> 한자 추가
+            </button>
+            <button class="btn btn-info" data-bs-toggle="modal" data-bs-target="#uploadChineseModal">
+                <i class="fas fa-upload"></i> 한자 업로드
+            </button>
+            <a href="{{ url_for('chinese_test') }}" class="btn btn-primary">
+                <i class="fas fa-pen"></i> 한자 테스트
+            </a>
+        </div>
+    </div>
+
+    <!-- 통계 카드 -->
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card text-white bg-primary">
+                <div class="card-body">
+                    <h5 class="card-title">총 한자</h5>
+                    <h2>{{ chinese_list|length }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <h5 class="card-title">암기 완료</h5>
+                    <h2>{{ chinese_list|selectattr('is_learned')|list|length }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-white bg-warning">
+                <div class="card-body">
+                    <h5 class="card-title">학습 중</h5>
+                    <h2>{{ chinese_list|rejectattr('is_learned')|list|length }}</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 한자 목록 테이블 -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">한자 목록</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>한자</th>
+                        <th>뜻</th>
+                        <th>발음</th>
+                        <th>출처</th>
+                        <th>등록일</th>
+                        <th>암기 상태</th>
+                        <th>작업</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for word in chinese_list %}
+                    <tr id="word-{{ word.id }}">
+                        <td class="chinese-word" style="font-size: 1.5em; font-weight: bold;">{{ word.word }}</td>
+                        <td>{{ word.meaning }}</td>
+                        <td>{{ word.pronunciation or '-' }}</td>
+                        <td>{{ word.text_title or '-' }}</td>
+                        <td>{{ word.added_at[:10] if word.added_at else '-' }}</td>
+                        <td>
+                            <button class="btn btn-sm btn-toggle-learned {% if word.is_learned %}btn-success{% else %}btn-outline-secondary{% endif %}"
+                                    data-word-id="{{ word.id }}"
+                                    onclick="toggleLearned('{{ word.id }}', this)">
+                                <i class="fas {% if word.is_learned %}fa-check-circle{% else %}fa-circle{% endif %}"></i>
+                                {% if word.is_learned %}암기 완료{% else %}학습 중{% endif %}
+                            </button>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-primary" onclick="editWord('{{ word.id }}', '{{ word.word }}', '{{ word.meaning }}', '{{ word.pronunciation or '' }}')">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteWord('{{ word.id }}', '{{ word.word }}')">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% if not chinese_list %}
+            <div class="text-center text-muted py-5">
+                <i class="fas fa-inbox fa-3x mb-3"></i>
+                <p>등록된 한자가 없습니다. "한자 추가" 버튼을 눌러 시작하세요!</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- 한자 추가 모달 -->
+<div class="modal fade" id="addChineseModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">한자 추가</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addChineseForm">
+                    <div class="mb-3">
+                        <label class="form-label">한자 *</label>
+                        <input type="text" class="form-control" id="newWord" required style="font-size: 1.5em;">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">뜻 *</label>
+                        <input type="text" class="form-control" id="newMeaning" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">발음 (훈독/음독)</label>
+                        <input type="text" class="form-control" id="newPronunciation" placeholder="예: 사람 인, ジン">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">출처</label>
+                        <select class="form-select" id="newSource">
+                            <option value="">선택 안함</option>
+                            {% for source in sources %}
+                            <option value="{{ source }}">{{ source }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-success" onclick="addChinese()">추가</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 한자 수정 모달 -->
+<div class="modal fade" id="editChineseModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">한자 수정</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editChineseForm">
+                    <input type="hidden" id="editWordId">
+                    <div class="mb-3">
+                        <label class="form-label">한자 *</label>
+                        <input type="text" class="form-control" id="editWord" required style="font-size: 1.5em;">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">뜻 *</label>
+                        <input type="text" class="form-control" id="editMeaning" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">발음</label>
+                        <input type="text" class="form-control" id="editPronunciation">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" onclick="updateChinese()">수정</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 한자 일괄 업로드 모달 -->
+<div class="modal fade" id="uploadChineseModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">한자 일괄 업로드</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">출처 선택</label>
+                    <select class="form-select" id="uploadSource">
+                        <option value="">선택 안함</option>
+                        {% for source in sources %}
+                        <option value="{{ source }}">{{ source }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">한자 데이터 입력</label>
+                    <small class="text-muted d-block mb-2">
+                        <strong>형식1 (공백 구분):</strong> 한자 뜻 발음<br>
+                        예시: 男 사내 남<br>
+                        예시: 女 여자 녀<br>
+                        <br>
+                        <strong>형식2 (| 구분):</strong> 한자 | 뜻 | 발음<br>
+                        예시: 人 | 사람 | 사람 인
+                    </small>
+                    <textarea class="form-control" id="uploadChineseData" rows="15" 
+                              placeholder="男 사내 남&#10;女 여자 녀&#10;內 안 내"></textarea>
+                </div>
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i> 
+                    공백이나 '|'로 구분하여 입력하세요. 발음은 선택사항입니다.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" onclick="uploadChinese()">
+                    <i class="fas fa-upload"></i> 업로드
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 한자 추가
+function addChinese() {
+    const word = document.getElementById('newWord').value.trim();
+    const meaning = document.getElementById('newMeaning').value.trim();
+    const pronunciation = document.getElementById('newPronunciation').value.trim();
+    const source = document.getElementById('newSource').value;
+
+    if (!word || !meaning) {
+        alert('한자와 뜻은 필수입니다!');
+        return;
+    }
+
+    fetch('/api/add_chinese_word', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word, meaning, pronunciation, source })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.ok) {
+            alert('한자가 추가되었습니다!');
+            location.reload();
+        } else {
+            alert(data.error || '추가 실패');
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        alert('오류가 발생했습니다.');
+    });
+}
+
+// 한자 수정 모달 열기
+function editWord(id, word, meaning, pronunciation) {
+    document.getElementById('editWordId').value = id;
+    document.getElementById('editWord').value = word;
+    document.getElementById('editMeaning').value = meaning;
+    document.getElementById('editPronunciation').value = pronunciation;
+    
+    const modal = new bootstrap.Modal(document.getElementById('editChineseModal'));
+    modal.show();
+}
+
+// 한자 수정
+function updateChinese() {
+    const id = document.getElementById('editWordId').value;
+    const word = document.getElementById('editWord').value.trim();
+    const meaning = document.getElementById('editMeaning').value.trim();
+    const pronunciation = document.getElementById('editPronunciation').value.trim();
+
+    if (!word || !meaning) {
+        alert('한자와 뜻은 필수입니다!');
+        return;
+    }
+
+    fetch(`/api/update_chinese_word/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word, meaning, pronunciation })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.ok) {
+            alert('한자가 수정되었습니다!');
+            location.reload();
+        } else {
+            alert(data.error || '수정 실패');
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        alert('오류가 발생했습니다.');
+    });
+}
+
+// 한자 삭제
+function deleteWord(id, word) {
+    if (!confirm(`"${word}" 한자를 삭제하시겠습니까?`)) {
+        return;
+    }
+
+    fetch(`/api/delete_chinese_word/${id}`, {
+        method: 'DELETE'
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.ok) {
+            document.getElementById(`word-${id}`).remove();
+            alert('한자가 삭제되었습니다!');
+        } else {
+            alert(data.error || '삭제 실패');
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        alert('오류가 발생했습니다.');
+    });
+}
+
+// 암기 상태 토글
+function toggleLearned(id, button) {
+    fetch(`/api/toggle_chinese_learned/${id}`, {
+        method: 'POST'
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.ok) {
+            if (data.is_learned) {
+                button.className = 'btn btn-sm btn-toggle-learned btn-success';
+                button.innerHTML = '<i class="fas fa-check-circle"></i> 암기 완료';
+            } else {
+                button.className = 'btn btn-sm btn-toggle-learned btn-outline-secondary';
+                button.innerHTML = '<i class="fas fa-circle"></i> 학습 중';
+            }
+        } else {
+            alert('상태 변경 실패');
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        alert('오류가 발생했습니다.');
+    });
+}
+
+// 한자 일괄 업로드
+function uploadChinese() {
+    const data = document.getElementById('uploadChineseData').value.trim();
+    const source = document.getElementById('uploadSource').value;
+    
+    if (!data) {
+        alert('한자 데이터를 입력하세요!');
+        return;
+    }
+    
+    const lines = data.split('\n').filter(line => line.trim());
+    const words = [];
+    
+    for (const line of lines) {
+        let parts;
+        
+        // | 구분자가 있으면 | 로 분리, 없으면 공백으로 분리
+        if (line.includes('|')) {
+            parts = line.split('|').map(p => p.trim());
+        } else {
+            // 공백으로 분리 (여러 공백도 하나로 처리)
+            parts = line.trim().split(/\s+/);
+        }
+        
+        if (parts.length < 2) {
+            continue; // 최소 한자와 뜻은 있어야 함
+        }
+        
+        words.push({
+            word: parts[0],
+            meaning: parts[1],
+            pronunciation: parts[2] || ''
+        });
+    }
+    
+    if (words.length === 0) {
+        alert('올바른 형식의 한자 데이터가 없습니다!');
+        return;
+    }
+    
+    if (!confirm(`${words.length}개의 한자를 업로드하시겠습니까?`)) {
+        return;
+    }
+    
+    fetch('/api/upload_chinese_words', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ words, source })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.ok) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert(data.error || '업로드 실패');
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        alert('오류가 발생했습니다.');
+    });
+}
+</script>
+
+<style>
+.chinese-word {
+    font-family: "Noto Serif CJK KR", "Source Han Serif K", serif;
+}
+</style>
+{% endblock %}

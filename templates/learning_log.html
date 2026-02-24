@@ -31,9 +31,17 @@
           <option value="{{ t }}">
         {% endfor %}
       </datalist>
+
+      <select name="user_name" class="border rounded px-3 py-2">
+        <option value="">전체 사용자</option>
+        {% for user_name in user_options %}
+          <option value="{{ user_name }}" {% if selected_user == user_name %}selected{% endif %}>{{ user_name }}</option>
+        {% endfor %}
+      </select>
+
       <input type="hidden" name="view_all" value="{{ '1' if view_all else '0' }}" id="viewAllInput">
       <button type="submit" class="px-3 py-2 bg-indigo-600 text-white rounded">검색</button>
-      {% if q %}
+      {% if q or selected_user %}
         <a href="/learning_log?view_all={{ '1' if view_all else '0' }}" class="px-3 py-2 bg-gray-200 rounded">초기화</a>
       {% endif %}
       <p class="text-sm text-gray-500 ml-4">{{ logs|length }}건</p>
@@ -58,7 +66,7 @@
           <tr class="hover:bg-gray-50 text-gray-700">
             <td class="p-3 border">{{ log.completed_at.strftime('%Y-%m-%d %H:%M') }}</td>
             <td class="p-3 border">
-              <span class="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-medium">{{ log.user_name }}</span>
+              <span class="user-badge px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-medium" data-user-name="{{ log.user_name }}">{{ log.user_name }}</span>
             </td>
             <td class="p-3 border">{{ log.test_name }}</td>
             <td class="p-3 border text-center">{{ log.total_questions }}</td>
@@ -169,5 +177,50 @@ function toggleViewAll(checked) {
   input.value = checked ? '1' : '0';
   form.submit();
 }
+
+function applyUserBadgeColors() {
+  const isViewAll = {{ 'true' if view_all else 'false' }};
+  if (!isViewAll) return;
+
+  const badges = document.querySelectorAll('.user-badge');
+  if (!badges.length) return;
+
+  // 사용자별 고정 색상 맵: 권혁재는 항상 초록색(emerald)
+  const userColorMap = {
+    '박영진': ['bg-purple-100', 'text-purple-700'],
+    '권혁재': ['bg-emerald-100', 'text-emerald-700'],
+    '권유현': ['bg-blue-100', 'text-blue-700'],
+    'GUEST': ['bg-amber-100', 'text-amber-700'],
+  };
+  
+  const fallbackPalette = [
+    ['bg-rose-100', 'text-rose-700'],
+    ['bg-cyan-100', 'text-cyan-700'],
+    ['bg-lime-100', 'text-lime-700'],
+    ['bg-indigo-100', 'text-indigo-700']
+  ];
+
+  const colorMap = new Map();
+
+  badges.forEach((badge) => {
+    const userName = (badge.dataset.userName || '').trim();
+    if (!userName) return;
+
+    if (!colorMap.has(userName)) {
+      if (userColorMap[userName]) {
+        colorMap.set(userName, userColorMap[userName]);
+      } else {
+        const fallbackIndex = colorMap.size % fallbackPalette.length;
+        colorMap.set(userName, fallbackPalette[fallbackIndex]);
+      }
+    }
+
+    const [bgClass, textClass] = colorMap.get(userName);
+    badge.classList.remove('bg-purple-100', 'text-purple-700');
+    badge.classList.add(bgClass, textClass);
+  });
+}
+
+applyUserBadgeColors();
 </script>
 {% endblock %}

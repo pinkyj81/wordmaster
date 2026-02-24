@@ -11,9 +11,9 @@
   </select>
 </div>
 
-<!-- 텍스트 제목 선택 -->
+<!-- 본문 제목 선택 -->
 <div class="mb-6">
-  <label class="block mb-2 text-gray-700 font-medium">텍스트 선택</label>
+  <label class="block mb-2 text-gray-700 font-medium">본문 선택</label>
   <select id="textSelector" class="border rounded px-3 py-2 w-full max-w-md" onchange="loadWordsByText()">
     <option value="">제목을 선택하세요</option>
   </select>
@@ -147,7 +147,7 @@ function loadSourceOptions() {
     });
 }
 
-// 출처별 텍스트 목록 로드
+// 출처별 본문 목록 로드
 function loadTitlesBySource() {
   const source = document.getElementById('sourceSelector').value;
   const textSelector = document.getElementById('textSelector');
@@ -172,7 +172,7 @@ function loadTitlesBySource() {
     .then(titles => {
       console.log('Titles received:', titles);
       if (titles.length === 0) {
-        textSelector.innerHTML = '<option value="">해당 출처에 텍스트가 없습니다</option>';
+        textSelector.innerHTML = '<option value="">해당 출처에 본문이 없습니다</option>';
         return;
       }
       titles.forEach(t => {
@@ -183,12 +183,12 @@ function loadTitlesBySource() {
       });
     })
     .catch(err => {
-      console.error('텍스트 목록 로드 실패:', err);
-      alert('텍스트 목록을 불러오는데 실패했습니다: ' + err.message);
+      console.error('본문 목록 로드 실패:', err);
+      alert('본문 목록을 불러오는데 실패했습니다: ' + err.message);
     });
 }
 
-// 텍스트별 단어 목록 로드
+// 본문별 단어 목록 로드
 function loadWordsByText() {
   const textId = document.getElementById('textSelector').value;
   
@@ -304,7 +304,7 @@ function toggleSelectAll(checkbox) {
 // 새 단어 추가
 function addNewWord() {
   if (!currentTextId) {
-    alert('텍스트를 먼저 선택하세요.');
+    alert('본문을 먼저 선택하세요.');
     return;
   }
 
@@ -400,7 +400,7 @@ function updateWordCount() {
 
 // 셀 선택 시작
 function startCellSelection(event, cell) {
-  if (event.ctrlKey || event.metaKey) return; // Ctrl 키로 텍스트 선택은 허용
+  if (event.ctrlKey || event.metaKey) return; // Ctrl 키로 본문 선택은 업덈
   
   isSelecting = true;
   selectionStart = cell;

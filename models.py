@@ -18,3 +18,5 @@ class Word(db.Model):
     is_learned = db.Column(db.Boolean, default=False)
     text_id = db.Column(db.String)
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
+    language = db.Column(db.String, default='english')  # 'english', 'chinese'
+    pronunciation = db.Column(db.String)  # 한자 발음 (훈독/음독)

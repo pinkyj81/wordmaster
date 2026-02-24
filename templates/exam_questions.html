@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h2 class="text-2xl font-semibold mb-6 text-gray-800">문제 풀기 & 학습하기</h2>
+<h2 class="text-2xl font-semibold mb-6 text-gray-800">텝스문제 & 학습하기</h2>
 
 <!-- 모드 선택 -->
 <div class="mb-6">
   <label class="block mb-2 text-gray-700 font-medium">모드 선택</label>
   <div class="flex gap-3">
-    <button id="examModeBtn" onclick="switchMode('exam')" class="px-6 py-2 rounded-lg font-semibold transition bg-blue-600 text-white">
-      📝 시험 모드
-    </button>
     <button id="studyModeBtn" onclick="switchMode('study')" class="px-6 py-2 rounded-lg font-semibold transition bg-gray-300 text-gray-700 hover:bg-gray-400">
       📚 학습 모드
+    </button>
+    <button id="examModeBtn" onclick="switchMode('exam')" class="px-6 py-2 rounded-lg font-semibold transition bg-blue-600 text-white">
+      📝 시험 모드
     </button>
   </div>
   <p class="text-sm text-gray-500 mt-2" id="modeDescription">시험 모드: 객관식 문제를 풀고 채점합니다</p>
@@ -41,13 +41,13 @@
   </button>
 </div>
 
-<!-- 문제 풀기/학습하기 모달 -->
+<!-- 텝스문제/학습하기 모달 -->
 <div id="examModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
   <div class="bg-white rounded-2xl shadow-2xl w-[900px] max-h-[90vh] overflow-y-auto p-8 relative">
     <!-- 헤더 -->
     <div class="flex justify-between items-center mb-6 border-b pb-4">
       <div>
-        <h2 class="text-2xl font-bold text-gray-800" id="modalTitle">문제 풀기</h2>
+        <h2 class="text-2xl font-bold text-gray-800" id="modalTitle">텝스문제</h2>
         <p class="text-sm text-gray-500 mt-1">문제: <span id="currentQuestionNum">1</span> / <span id="totalQuestions">0</span></p>
       </div>
       <button onclick="closeExamModal()" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
@@ -76,11 +76,11 @@
       <div id="studyAnswerContainer" class="hidden">
         <div class="bg-green-50 border-l-4 border-green-600 p-6 mb-4 rounded">
           <p class="text-sm text-green-800 font-semibold mb-2">정답</p>
-          <p id="answerText" class="text-xl text-gray-800 font-bold"></p>
+          <p id="answerText" class="text-lg text-gray-800 font-semibold"></p>
         </div>
         <div class="bg-yellow-50 border-l-4 border-yellow-600 p-6 rounded">
           <p class="text-sm text-yellow-800 font-semibold mb-2">힌트 / 의미</p>
-          <p id="hintText" class="text-lg text-gray-700"></p>
+          <p id="hintText" class="text-base text-gray-700"></p>
         </div>
       </div>
     </div>
@@ -589,7 +589,7 @@ function startExam() {
       userAnswers = new Array(questions.length).fill(null);
       
       // 모달 표시
-      document.getElementById('modalTitle').textContent = '문제 풀기';
+      document.getElementById('modalTitle').textContent = '텝스문제';
       document.getElementById('examModal').classList.remove('hidden');
       document.getElementById('examModal').classList.add('flex');
       

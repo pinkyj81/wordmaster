@@ -5,6 +5,17 @@
 
 <div class="mb-6">
   <p class="text-gray-600 mb-4">한글 뜻을 보고 영어 단어를 스펠링하세요. 첫 글자는 힌트로 제공됩니다.</p>
+
+  <!-- 출처 선택 -->
+  <div class="mb-4">
+    <label class="block mb-2 text-gray-700 font-medium">출처 선택</label>
+    <select id="sourceSelector" onchange="filterTextsBySource()" class="border rounded px-3 py-2 w-full max-w-md">
+      <option value="">모든 출처</option>
+      {% for src in sources %}
+        <option value="{{ src }}">{{ src }}</option>
+      {% endfor %}
+    </select>
+  </div>
   
   <!-- 텍스트 선택 -->
   <div class="mb-4">
@@ -12,7 +23,7 @@
     <select id="textSelector" class="border rounded px-3 py-2 w-full max-w-md">
       <option value="">텍스트를 선택하세요</option>
       {% for text in texts %}
-        <option value="{{ text.id }}">{{ text.title }}</option>
+        <option value="{{ text.id }}" data-source="{{ text.source }}">[{{ text.source }}] {{ text.title }}</option>
       {% endfor %}
     </select>
   </div>
@@ -109,6 +120,8 @@
 </div>
 
 <script>
+const allTextItems = {{ texts|tojson|safe }};
+
 let words = [];
 let currentIndex = 0;
 let correctCount = 0;
@@ -119,6 +132,24 @@ let startTime = null;
 let testTextId = '';
 let testTextTitle = '';
 let resultSaved = false;
+
+function filterTextsBySource() {
+  const selectedSource = document.getElementById('sourceSelector').value;
+  const selector = document.getElementById('textSelector');
+
+  selector.innerHTML = '<option value="">텍스트를 선택하세요</option>';
+
+  const filtered = selectedSource
+    ? allTextItems.filter(item => item.source === selectedSource)
+    : allTextItems;
+
+  filtered.forEach(item => {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = `[${item.source}] ${item.title}`;
+    selector.appendChild(option);
+  });
+}
 
 async function startSpellingTest() {
   const textId = document.getElementById('textSelector').value;

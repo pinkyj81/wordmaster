@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+
+{% block title %}한자 테스트{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="card">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">
+                <i class="fas fa-pen"></i> 한자 테스트
+            </h4>
+        </div>
+        <div class="card-body">
+            {% if count > 0 %}
+            <div id="testArea">
+                <div class="mb-4 text-center">
+                    <h5>문제 <span id="currentQuestion">1</span> / <span id="totalQuestions">{{ count }}</span></h5>
+                    <div class="progress">
+                        <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="text-center mb-4">
+                    <div class="card bg-light p-5">
+                        <h1 id="questionWord" class="display-1 chinese-word mb-3" style="font-size: 8rem;"></h1>
+                        <h4 class="text-primary mb-2" id="questionPronunciation" style="font-size: 1.8rem;"></h4>
+                        <p class="text-muted">(음독을 보고 뜻을 입력하세요)</p>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="form-label fw-bold">한자의 뜻(훈독)을 입력하세요:</label>
+                    <input type="text" id="answerInput" class="form-control form-control-lg" 
+                           placeholder="예: 집" autocomplete="off">
+                    <div id="feedback" class="mt-2"></div>
+                </div>
+
+                <div class="d-grid gap-2">
+                    <button id="checkBtn" class="btn btn-primary btn-lg" onclick="checkAnswer()">
+                        <i class="fas fa-check"></i> 정답 확인
+                    </button>
+                    <button id="nextBtn" class="btn btn-success btn-lg d-none" onclick="nextQuestion()">
+                        <i class="fas fa-arrow-right"></i> 다음 문제
+                    </button>
+                </div>
+            </div>
+
+            <div id="resultArea" class="d-none text-center">
+                <h2 class="mb-4">테스트 완료!</h2>
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card text-white bg-info">
+                            <div class="card-body">
+                                <h5>총 문제</h5>
+                                <h1 id="resultTotal"></h1>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card text-white bg-success">
+                            <div class="card-body">
+                                <h5>정답</h5>
+                                <h1 id="resultCorrect"></h1>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card text-white bg-danger">
+                            <div class="card-body">
+                                <h5>오답</h5>
+                                <h1 id="resultWrong"></h1>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <h3 class="mt-4">점수: <span id="resultScore"></span>점</h3>
+                
+                <div id="wrongList" class="mt-4"></div>
+
+                <div class="mt-4">
+                    <a href="{{ url_for('chinese_words') }}" class="btn btn-primary btn-lg">
+                        <i class="fas fa-arrow-left"></i> 한자 목록으로
+                    </a>
+                    <button class="btn btn-secondary btn-lg" onclick="location.reload()">
+                        <i class="fas fa-redo"></i> 다시 테스트
+                    </button>
+                </div>
+            </div>
+            {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                <h4>학습할 한자가 없습니다</h4>
+                <p class="text-muted">모든 한자를 암기했거나 등록된 한자가 없습니다.</p>
+                <a href="{{ url_for('chinese_words') }}" class="btn btn-primary mt-3">
+                    <i class="fas fa-arrow-left"></i> 한자 목록으로
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+const words = {{ words | tojson }};
+let currentIndex = 0;
+let correctCount = 0;
+let wrongWords = [];
+
+function updateProgress() {
+    const progress = ((currentIndex + 1) / words.length) * 100;
+    document.getElementById('progressBar').style.width = progress + '%';
+    document.getElementById('currentQuestion').textContent = currentIndex + 1;
+    document.getElementById('totalQuestions').textContent = words.length;
+}
+
+function showQuestion() {
+    if (currentIndex >= words.length) {
+        showResult();
+        return;
+    }
+
+    const word = words[currentIndex];
+    document.getElementById('questionWord').textContent = word.word;
+    document.getElementById('questionPronunciation').textContent = word.pronunciation || '';
+    document.getElementById('answerInput').value = '';
+    document.getElementById('feedback').innerHTML = '';
+    document.getElementById('answerInput').disabled = false;
+    document.getElementById('checkBtn').classList.remove('d-none');
+    document.getElementById('nextBtn').classList.add('d-none');
+    document.getElementById('answerInput').focus();
+    
+    updateProgress();
+}
+
+function checkAnswer() {
+    const userAnswer = document.getElementById('answerInput').value.trim();
+    const correctAnswer = words[currentIndex].meaning;
+    
+    if (!userAnswer) {
+        alert('답을 입력하세요!');
+        return;
+    }
+
+    const feedback = document.getElementById('feedback');
+    document.getElementById('answerInput').disabled = true;
+    document.getElementById('checkBtn').classList.add('d-none');
+    document.getElementById('nextBtn').classList.remove('d-none');
+
+    // 정답 판정 (공백 제거하고 비교)
+    const isCorrect = userAnswer.replace(/\s/g, '').toLowerCase() === correctAnswer.replace(/\s/g, '').toLowerCase();
+
+    if (isCorrect) {
+        correctCount++;
+        feedback.innerHTML = `<div class="alert alert-success">
+            <i class="fas fa-check-circle"></i> <strong>정답입니다!</strong>
+        </div>`;
+    } else {
+        wrongWords.push({
+            word: words[currentIndex].word,
+            userAnswer: userAnswer,
+            correctAnswer: correctAnswer,
+            pronunciation: words[currentIndex].pronunciation
+        });
+        feedback.innerHTML = `<div class="alert alert-danger">
+            <i class="fas fa-times-circle"></i> <strong>틀렸습니다!</strong><br>
+            정답: <strong>${correctAnswer}</strong>
+        </div>`;
+    }
+}
+
+function nextQuestion() {
+    currentIndex++;
+    showQuestion();
+}
+
+function showResult() {
+    document.getElementById('testArea').classList.add('d-none');
+    document.getElementById('resultArea').classList.remove('d-none');
+
+    const total = words.length;
+    const correct = correctCount;
+    const wrong = total - correct;
+    const score = Math.round((correct / total) * 100);
+
+    document.getElementById('resultTotal').textContent = total;
+    document.getElementById('resultCorrect').textContent = correct;
+    document.getElementById('resultWrong').textContent = wrong;
+    document.getElementById('resultScore').textContent = score;
+
+    // 오답 목록 표시
+    if (wrongWords.length > 0) {
+        let wrongHtml = '<div class="card"><div class="card-header bg-danger text-white"><h5 class="mb-0">오답 노트</h5></div><div class="card-body">';
+        wrongHtml += '<div class="table-responsive"><table class="table"><thead><tr><th>한자</th><th>발음</th><th>내 답</th><th>정답</th></tr></thead><tbody>';
+        
+        wrongWords.forEach(w => {
+            wrongHtml += `<tr>
+                <td class="chinese-word" style="font-size: 1.3em; font-weight: bold;">${w.word}</td>
+                <td>${w.pronunciation || '-'}</td>
+                <td class="text-danger">${w.userAnswer}</td>
+                <td class="text-success"><strong>${w.correctAnswer}</strong></td>
+            </tr>`;
+        });
+        
+        wrongHtml += '</tbody></table></div></div></div>';
+        document.getElementById('wrongList').innerHTML = wrongHtml;
+    }
+}
+
+// Enter 키로 답안 제출
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('answerInput');
+    if (input) {
+        input.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                if (!document.getElementById('checkBtn').classList.contains('d-none')) {
+                    checkAnswer();
+                } else if (!document.getElementById('nextBtn').classList.contains('d-none')) {
+                    nextQuestion();
+                }
+            }
+        });
+        
+        // 첫 문제 표시
+        if (words.length > 0) {
+            showQuestion();
+        }
+    }
+});
+</script>
+
+<style>
+.chinese-word {
+    font-family: "Noto Serif CJK KR", "Source Han Serif K", serif;
+}
+</style>
+{% endblock %}

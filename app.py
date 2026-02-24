@@ -53,7 +53,8 @@ def get_user_sources():
         return []
     user_name = session['user_name']
     sources = WordUser.query.filter_by(user_name=user_name).all()
-    return [s.source for s in sources]
+    unique_sources = {s.source for s in sources if s.source}
+    return sorted(unique_sources, key=lambda value: value.lower())
 
 # Convenience helper: low-level DBAPI connection context manager
 from contextlib import contextmanager
@@ -93,6 +94,8 @@ class WordsRow(db.Model):
     updated_at = db.Column(db.String)
     example = db.Column(db.String)
     exam_korean = db.Column(db.String)
+    language = db.Column(db.String, default='english')
+    pronunciation = db.Column(db.String)
 
 # ✅ 시험 문제 모델
 class ExamQuestion(db.Model):
@@ -275,7 +278,24 @@ def word_test(text_id):
     words = WordsRow.query.filter_by(text_id=text_id).filter(
         or_(WordsRow.is_learned == False, WordsRow.is_learned.is_(None))
     ).all()
-    word_list = [{"word": w.word, "meaning": w.meaning, "text_title": w.text_title} for w in words]
+    
+    # language와 pronunciation 정보 포함
+    word_list = []
+    for w in words:
+        word_data = {
+            "word": w.word,
+            "meaning": w.meaning,
+            "text_title": w.text_title
+        }
+        # 한자인 경우에만 pronunciation 추가
+        if hasattr(w, 'language') and w.language == 'chinese':
+            word_data["pronunciation"] = getattr(w, 'pronunciation', '')
+            word_data["language"] = 'chinese'
+        else:
+            word_data["language"] = 'english'
+            
+        word_list.append(word_data)
+    
     return render_template('test_modal.html', words=word_list)
 
 
@@ -359,6 +379,7 @@ def word_management():
 @login_required
 def learning_log():
     q = request.args.get('q', '').strip()
+    selected_user = request.args.get('user_name', '').strip()
     view_all = request.args.get('view_all', '0') == '1'
     user_id = session.get('db_user_id')
     is_admin = session.get('is_admin', False)
@@ -458,9 +479,17 @@ def learning_log():
     # distinct test names for datalist/autocomplete
     if show_all:
         tn_rows = db.session.execute(text("SELECT DISTINCT test_name FROM test_records_rows ORDER BY test_name")).fetchall()
+        un_rows = db.session.execute(text("SELECT DISTINCT user_id FROM test_records_rows WHERE user_id IS NOT NULL ORDER BY user_id")).fetchall()
     else:
         tn_rows = db.session.execute(text("SELECT DISTINCT test_name FROM test_records_rows WHERE user_id = :user_id ORDER BY test_name"), {"user_id": user_id}).fetchall()
+        un_rows = db.session.execute(text("SELECT DISTINCT user_id FROM test_records_rows WHERE user_id = :user_id ORDER BY user_id"), {"user_id": user_id}).fetchall()
     test_names = [r.test_name for r in tn_rows]
+
+    user_options = []
+    for row in un_rows:
+        display_name = user_map.get(row.user_id, f'User {row.user_id}')
+        if display_name not in user_options:
+            user_options.append(display_name)
 
     formatted_logs = []
     for row in logs:
@@ -480,7 +509,20 @@ def learning_log():
             "user_name": user_map.get(row.user_id, f'User {row.user_id}')
         })
 
-    return render_template('learning_log.html', logs=formatted_logs, summary=summary, q=q, test_names=test_names, is_admin=is_admin, view_all=view_all)
+    if selected_user:
+        formatted_logs = [log for log in formatted_logs if log.get("user_name") == selected_user]
+
+    return render_template(
+        'learning_log.html',
+        logs=formatted_logs,
+        summary=summary,
+        q=q,
+        test_names=test_names,
+        is_admin=is_admin,
+        view_all=view_all,
+        user_options=user_options,
+        selected_user=selected_user,
+    )
 
 
 # ✅ 단어 찾기 페이지
@@ -528,6 +570,60 @@ def word_search():
                           words=results, 
                           search_query=search_query, 
                           search_type=search_type)
+
+
+# ✅ 단어 검색 API (구글이 사용중)
+@app.route('/api/search_words')
+@login_required
+def api_search_words():
+    """단어 검색 결과를 JSON으로 반환"""
+    search_query = request.args.get('q', '').strip()
+    search_type = request.args.get('type', 'word')  # word, meaning, all
+    
+    if not search_query:
+        return jsonify([])
+    
+    # 검색 조건 생성
+    if search_type == 'word':
+        sql_query = text("""
+            SELECT id, word, meaning, exam_korean, example, is_learned, 
+                   text_id, text_title, created_at
+            FROM words_rows
+            WHERE word LIKE :query
+            ORDER BY word ASC
+        """)
+        params = {"query": f"%{search_query}%"}
+    elif search_type == 'meaning':
+        sql_query = text("""
+            SELECT id, word, meaning, exam_korean, example, is_learned, 
+                   text_id, text_title, created_at
+            FROM words_rows
+            WHERE meaning LIKE :query
+            ORDER BY word ASC
+        """)
+        params = {"query": f"%{search_query}%"}
+    else:  # all
+        sql_query = text("""
+            SELECT id, word, meaning, exam_korean, example, is_learned, 
+                   text_id, text_title, created_at
+            FROM words_rows
+            WHERE word LIKE :query OR meaning LIKE :query
+            ORDER BY word ASC
+        """)
+        params = {"query": f"%{search_query}%"}
+    
+    results = db.session.execute(sql_query, params).fetchall()
+    
+    return jsonify([{
+        "id": r.id,
+        "word": r.word,
+        "meaning": r.meaning,
+        "example": r.example,
+        "exam_korean": r.exam_korean,
+        "is_learned": r.is_learned,
+        "text_id": r.text_id,
+        "text_title": r.text_title
+    } for r in results])
 
 
 # ✅ 발음 듣기 (미국식)
@@ -1485,23 +1581,23 @@ def spelling_test():
     user_sources = get_user_sources()
     
     if not user_sources:
-        return render_template('spelling_test.html', texts=[])
+        return render_template('spelling_test.html', texts=[], sources=[])
     
     # IN 절을 위한 파라미터 생성
     source_params = {f'src{i}': src for i, src in enumerate(user_sources)}
     source_placeholders = ', '.join([f':src{i}' for i in range(len(user_sources))])
     
     query = text(f"""
-        SELECT id, title
+        SELECT id, title, source
         FROM text_records_rows
         WHERE source IN ({source_placeholders})
-        ORDER BY uploaded_at DESC
+        ORDER BY source ASC, title ASC
     """)
     
     texts = db.session.execute(query, source_params).fetchall()
-    text_list = [{"id": t.id, "title": t.title} for t in texts]
+    text_list = [{"id": t.id, "title": t.title, "source": t.source} for t in texts]
     
-    return render_template('spelling_test.html', texts=text_list)
+    return render_template('spelling_test.html', texts=text_list, sources=user_sources)
 
 # ✅ 스펠링 테스트용 단어 가져오기 API
 @app.route('/api/spelling_test/words/<text_id>')
@@ -1539,7 +1635,322 @@ def get_spelling_test_words(text_id):
         "words": word_list,
         "total_unlearned": total_count,
         "selected_count": len(word_list)
+        
     })
+
+
+# ============================================
+# 한자 학습 기능
+# ============================================
+
+# ✅ 한자 학습 메인 페이지
+@app.route('/chinese')
+@login_required
+def chinese_words():
+    """한자 단어 학습 메인 페이지"""
+    user_sources = get_user_sources()
+    is_admin = session.get('is_admin', False)
+    
+    # 관리자는 모든 한자를 볼 수 있음
+    if is_admin or not user_sources:
+        query = text("""
+            SELECT id, word, meaning, pronunciation, is_learned, text_title, added_at
+            FROM words_rows
+            WHERE language = 'chinese'
+            ORDER BY added_at DESC
+        """)
+        result = db.session.execute(query).fetchall()
+    else:
+        # IN 절을 위한 파라미터 생성
+        source_params = {f'src{i}': src for i, src in enumerate(user_sources)}
+        source_placeholders = ', '.join([f':src{i}' for i in range(len(user_sources))])
+        
+        # 한자 단어 목록 조회 (language='chinese')
+        query = text(f"""
+            SELECT id, word, meaning, pronunciation, is_learned, text_title, added_at
+            FROM words_rows
+            WHERE language = 'chinese'
+            AND (text_title IN ({source_placeholders}) OR text_title IS NULL)
+            ORDER BY added_at DESC
+        """)
+        
+        result = db.session.execute(query, source_params).fetchall()
+    
+    # Row 객체를 딕셔너리로 변환
+    chinese_list = [{
+        'id': r.id,
+        'word': r.word,
+        'meaning': r.meaning,
+        'pronunciation': r.pronunciation,
+        'is_learned': r.is_learned,
+        'text_title': r.text_title,
+        'added_at': str(r.added_at) if r.added_at else None
+    } for r in result]
+    
+    return render_template('chinese_words.html', 
+                           chinese_list=chinese_list, 
+                           sources=user_sources)
+
+
+# ✅ API: 한자 단어 추가
+@app.route('/api/add_chinese_word', methods=['POST'])
+@login_required
+def api_add_chinese_word():
+    """한자 단어 추가 API"""
+    data = request.get_json(force=True)
+    word = (data.get('word') or '').strip()  # 한자
+    meaning = (data.get('meaning') or '').strip()  # 뜻
+    pronunciation = (data.get('pronunciation') or '').strip()  # 발음 (훈독/음독)
+    source = (data.get('source') or '').strip()  # 출처
+    
+    if not word or not meaning:
+        return jsonify({"error": "한자와 뜻은 필수입니다"}), 400
+    
+    # meaning을 "뜻 음" 형식으로 결합
+    if pronunciation:
+        combined_meaning = f"{meaning} {pronunciation}"
+    else:
+        combined_meaning = meaning
+    
+    # 중복 체크
+    exists = db.session.execute(
+        text("SELECT id FROM words_rows WHERE word = :word AND language = 'chinese'"),
+        {"word": word}
+    ).fetchone()
+    
+    if exists:
+        return jsonify({"error": "이미 등록된 한자입니다", "ok": False}), 400
+    
+    # 새 ID 생성
+    last = db.session.execute(text("SELECT MAX(CAST(id AS INT)) AS max_id FROM words_rows")).fetchone()
+    new_id = str((last.max_id or 0) + 1)
+    now = now_kst()
+    
+    # 한자 단어 추가
+    insert_q = text("""
+        INSERT INTO words_rows
+            (id, word, meaning, pronunciation, language, is_learned, text_title, added_at, created_at, updated_at)
+        VALUES
+            (:id, :word, :meaning, :pronunciation, 'chinese', 0, :source, :now, :now, :now)
+    """)
+    
+    db.session.execute(insert_q, {
+        "id": new_id,
+        "word": word,
+        "meaning": combined_meaning,
+        "pronunciation": pronunciation,
+        "source": source,
+        "now": now
+    })
+    db.session.commit()
+    
+    return jsonify({"ok": True, "created": True, "id": new_id, "word": word})
+
+
+# ✅ API: 한자 단어 일괄 업로드
+@app.route('/api/upload_chinese_words', methods=['POST'])
+@login_required
+def api_upload_chinese_words():
+    """한자 단어 일괄 업로드 API"""
+    try:
+        data = request.get_json(force=True)
+        words = data.get('words', [])
+        source = data.get('source', '').strip()
+        
+        if not words:
+            return jsonify({"error": "한자 데이터가 없습니다"}), 400
+        
+        # 현재 가장 큰 id 값 가져오기
+        last = db.session.execute(text("SELECT MAX(CAST(id AS INT)) AS max_id FROM words_rows")).fetchone()
+        current_max_id = last.max_id or 0
+        now = now_kst()
+        
+        success_count = 0
+        skipped_count = 0
+        
+        for w in words:
+            word = (w.get('word') or '').strip()
+            meaning = (w.get('meaning') or '').strip()
+            pronunciation = (w.get('pronunciation') or '').strip()
+            
+            if not word or not meaning:
+                skipped_count += 1
+                continue
+            
+            # meaning을 "뜻 음" 형식으로 결합
+            if pronunciation:
+                combined_meaning = f"{meaning} {pronunciation}"
+            else:
+                combined_meaning = meaning
+            
+            # 중복 체크
+            exists = db.session.execute(
+                text("SELECT id FROM words_rows WHERE word = :word AND language = 'chinese'"),
+                {"word": word}
+            ).fetchone()
+            
+            if exists:
+                skipped_count += 1
+                continue
+            
+            current_max_id += 1
+            
+            insert_q = text("""
+                INSERT INTO words_rows
+                    (id, word, meaning, pronunciation, language, is_learned, text_title, added_at, created_at, updated_at)
+                VALUES
+                    (:id, :word, :meaning, :pronunciation, 'chinese', 0, :source, :now, :now, :now)
+            """)
+            
+            db.session.execute(insert_q, {
+                "id": str(current_max_id),
+                "word": word,
+                "meaning": combined_meaning,
+                "pronunciation": pronunciation,
+                "source": source,
+                "now": now
+            })
+            success_count += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            "ok": True,
+            "success_count": success_count,
+            "skipped_count": skipped_count,
+            "message": f"{success_count}개 추가, {skipped_count}개 건너뜀"
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ✅ API: 한자 단어 수정
+@app.route('/api/update_chinese_word/<word_id>', methods=['PUT'])
+@login_required
+def api_update_chinese_word(word_id):
+    """한자 단어 수정 API"""
+    data = request.get_json(force=True)
+    word = (data.get('word') or '').strip()
+    meaning = (data.get('meaning') or '').strip()
+    pronunciation = (data.get('pronunciation') or '').strip()
+    
+    if not word or not meaning:
+        return jsonify({"error": "한자와 뜻은 필수입니다"}), 400
+    
+    now = now_kst()
+    
+    update_q = text("""
+        UPDATE words_rows
+        SET word = :word,
+            meaning = :meaning,
+            pronunciation = :pronunciation,
+            updated_at = :now
+        WHERE id = :id AND language = 'chinese'
+    """)
+    
+    result = db.session.execute(update_q, {
+        "id": word_id,
+        "word": word,
+        "meaning": meaning,
+        "pronunciation": pronunciation,
+        "now": now
+    })
+    db.session.commit()
+    
+    if result.rowcount == 0:
+        return jsonify({"error": "한자를 찾을 수 없습니다"}), 404
+    
+    return jsonify({"ok": True, "updated": True})
+
+
+# ✅ API: 한자 단어 삭제
+@app.route('/api/delete_chinese_word/<word_id>', methods=['DELETE'])
+@login_required
+def api_delete_chinese_word(word_id):
+    """한자 단어 삭제 API"""
+    delete_q = text("DELETE FROM words_rows WHERE id = :id AND language = 'chinese'")
+    result = db.session.execute(delete_q, {"id": word_id})
+    db.session.commit()
+    
+    if result.rowcount == 0:
+        return jsonify({"error": "한자를 찾을 수 없습니다"}), 404
+    
+    return jsonify({"ok": True, "deleted": True})
+
+
+# ✅ API: 한자 암기 여부 토글
+@app.route('/api/toggle_chinese_learned/<word_id>', methods=['POST'])
+@login_required
+def api_toggle_chinese_learned(word_id):
+    """한자 암기 상태 토글 API"""
+    # 현재 상태 조회
+    current = db.session.execute(
+        text("SELECT is_learned FROM words_rows WHERE id = :id AND language = 'chinese'"),
+        {"id": word_id}
+    ).fetchone()
+    
+    if not current:
+        return jsonify({"error": "한자를 찾을 수 없습니다"}), 404
+    
+    new_status = not bool(current.is_learned)
+    now = now_kst()
+    
+    update_q = text("""
+        UPDATE words_rows
+        SET is_learned = :is_learned, updated_at = :now
+        WHERE id = :id AND language = 'chinese'
+    """)
+    
+    db.session.execute(update_q, {
+        "id": word_id,
+        "is_learned": new_status,
+        "now": now
+    })
+    db.session.commit()
+    
+    return jsonify({"ok": True, "is_learned": new_status})
+
+
+# ✅ 한자 테스트 페이지 (미암기 단어)
+@app.route('/chinese/test')
+@login_required
+def chinese_test():
+    """한자 테스트 페이지 (미암기 단어만)"""
+    user_sources = get_user_sources()
+    is_admin = session.get('is_admin', False)
+    
+    # 관리자는 모든 한자를 볼 수 있음
+    if is_admin or not user_sources:
+        query = text("""
+            SELECT id, word, meaning, pronunciation
+            FROM words_rows
+            WHERE language = 'chinese'
+            AND (is_learned = 0 OR is_learned IS NULL)
+            ORDER BY NEWID()
+        """)
+        words = db.session.execute(query).fetchall()
+    else:
+        source_params = {f'src{i}': src for i, src in enumerate(user_sources)}
+        source_placeholders = ', '.join([f':src{i}' for i in range(len(user_sources))])
+        
+        # 미암기 한자 조회
+        query = text(f"""
+            SELECT id, word, meaning, pronunciation
+            FROM words_rows
+            WHERE language = 'chinese'
+            AND (is_learned = 0 OR is_learned IS NULL)
+            AND (text_title IN ({source_placeholders}) OR text_title IS NULL)
+            ORDER BY NEWID()
+        """)
+        
+        words = db.session.execute(query, source_params).fetchall()
+    
+    word_list = [{"id": w.id, "word": w.word, "meaning": w.meaning, "pronunciation": w.pronunciation} for w in words]
+    
+    return render_template('chinese_test.html', words=word_list, count=len(word_list))
+
 
 # ✅ 서버 실행
 if __name__ == '__main__':
