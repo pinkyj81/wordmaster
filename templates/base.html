@@ -423,6 +423,7 @@
                 <th class="border px-3 py-2 text-left font-semibold text-gray-700 w-24">단어</th>
                 <th class="border px-3 py-2 text-left font-semibold text-gray-700 w-40">뜻</th>
                 <th class="border px-3 py-2 text-left font-semibold text-gray-700 flex-1">예문</th>
+                <th class="border px-3 py-2 text-center font-semibold text-gray-700 w-24">아는 단어</th>
                 <th class="border px-3 py-2 text-center font-semibold text-gray-700 w-20">삭제</th>
               </tr>
             </thead>
@@ -617,6 +618,8 @@ function mgmtLoadWordsByText() {
       words.forEach((word, idx) => {
         const tr = document.createElement('tr');
         tr.className = 'border-b hover:bg-gray-50 cursor-text';
+        tr.dataset.wordId = word.id;
+        const isChecked = word.is_learned ? 'checked' : '';
         tr.innerHTML = `
           <td class="border px-3 py-2">
             <div class="mgmt-word-cell" data-word-id="${word.id}" data-field="word" contenteditable="true" onblur="mgmtMarkDirty(this)">${word.word || ''}</div>
@@ -626,6 +629,9 @@ function mgmtLoadWordsByText() {
           </td>
           <td class="border px-3 py-2 max-w-xs">
             <div class="mgmt-word-cell text-xs whitespace-pre-wrap" data-word-id="${word.id}" data-field="example" contenteditable="true" onblur="mgmtMarkDirty(this)">${word.example ? word.example.substring(0, 100) : ''}</div>
+          </td>
+          <td class="border px-3 py-2 text-center">
+            <input type="checkbox" class="mgmt-is-learned" data-word-id="${word.id}" ${isChecked} onchange="mgmtMarkDirty(this)" style="width: 20px; height: 20px; cursor: pointer;">
           </td>
           <td class="border px-3 py-2 text-center">
             <button onclick="mgmtDeleteWord('${word.id}')" class="text-red-600 hover:text-red-800 text-sm font-semibold">🗑️</button>
@@ -665,13 +671,15 @@ function mgmtSaveChanges() {
     const wordCell = row.querySelector('[data-field="word"]');
     const meaningCell = row.querySelector('[data-field="meaning"]');
     const exampleCell = row.querySelector('[data-field="example"]');
+    const isLearnedCheckbox = row.querySelector('.mgmt-is-learned');
     
     if (wordCell && wordCell.dataset.wordId) {
       updates.push({
         id: wordCell.dataset.wordId,
         word: wordCell.textContent.trim(),
         meaning: meaningCell.textContent.trim(),
-        example: exampleCell.textContent.trim()
+        example: exampleCell.textContent.trim(),
+        is_learned: isLearnedCheckbox ? isLearnedCheckbox.checked : false
       });
     }
   });
