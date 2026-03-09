@@ -816,6 +816,58 @@ def get_words_by_text(text_id):
     } for r in result])
 
 
+@app.route('/print_words/<text_id>')
+@login_required
+def print_words(text_id):
+    """Render a print-friendly page that users can save as PDF from the browser print dialog."""
+    known_filter = request.args.get('known', 'all')
+    if known_filter not in {'all', 'exclude', 'only'}:
+        known_filter = 'all'
+
+    filter_sql = ''
+    if known_filter == 'exclude':
+        filter_sql = 'AND ISNULL(is_learned, 0) = 0'
+    elif known_filter == 'only':
+        filter_sql = 'AND ISNULL(is_learned, 0) = 1'
+
+    words_query = text(f"""
+        SELECT word, meaning, example, ISNULL(is_learned, 0) AS is_learned
+        FROM words_rows
+        WHERE text_id = :text_id
+        {filter_sql}
+        ORDER BY word ASC
+    """)
+    rows = db.session.execute(words_query, {"text_id": text_id}).fetchall()
+
+    meta_query = text("""
+        SELECT title, source
+        FROM text_records_rows
+        WHERE id = :text_id
+    """)
+    meta = db.session.execute(meta_query, {"text_id": text_id}).fetchone()
+
+    filter_label_map = {
+        'all': '전체 단어',
+        'exclude': '아는 단어 제외',
+        'only': '아는 단어만'
+    }
+
+    return render_template(
+        'word_print.html',
+        text_id=text_id,
+        text_title=meta.title if meta else '(제목 없음)',
+        source=meta.source if meta else '-',
+        known_filter=known_filter,
+        known_filter_label=filter_label_map[known_filter],
+        words=[{
+            'word': r.word,
+            'meaning': r.meaning,
+            'example': r.example or '',
+            'is_learned': int(r.is_learned or 0)
+        } for r in rows]
+    )
+
+
 
 # ✅ 단어 수정
 @app.route('/update_word', methods=['POST'])

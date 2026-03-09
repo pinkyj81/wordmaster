@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>단어 PDF 출력</title>
+  <style>
+    :root {
+      --text: #111827;
+      --muted: #4b5563;
+      --line: #d1d5db;
+      --head-bg: #f3f4f6;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+      color: var(--text);
+      background: #ffffff;
+    }
+
+    .meta {
+      margin-bottom: 14px;
+      line-height: 1.7;
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 24px;
+    }
+
+    .word-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 14px;
+    }
+
+    .word-card {
+      border: 2px solid #9ca3af;
+      border-radius: 24px;
+      padding: 20px 22px;
+      min-height: 150px;
+      page-break-inside: avoid;
+      background: #ffffff;
+      position: relative;
+    }
+
+    .word-index {
+      position: absolute;
+      top: 8px;
+      left: 12px;
+      font-size: 12px;
+      color: #6b7280;
+      font-weight: 600;
+    }
+
+    .word-title {
+      font-size: 40px;
+      line-height: 1.2;
+      font-weight: 500;
+      margin: 0 0 14px 0;
+      padding-bottom: 3px;
+      color: #111827;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .word-meaning {
+      font-size: 15px;
+      margin: 0 0 16px 0;
+      color: #111827;
+      word-break: break-word;
+    }
+
+    .word-example {
+      font-size: 15px;
+      color: #111827;
+      margin: 0;
+      word-break: break-word;
+    }
+
+    .empty {
+      padding: 30px;
+      text-align: center;
+      border: 1px solid var(--line);
+      color: var(--muted);
+    }
+
+    .toolbar {
+      margin-top: 16px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid #9ca3af;
+      background: #ffffff;
+      color: #111827;
+      border-radius: 6px;
+      padding: 7px 10px;
+      cursor: pointer;
+    }
+
+    @media print {
+      body {
+        padding: 0;
+      }
+
+      .toolbar {
+        display: none;
+      }
+
+      @page {
+        margin: 14mm;
+        size: A4;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>{{ text_title }}</h1>
+  <div class="meta">
+    <div><strong>출처:</strong> {{ source }}</div>
+  </div>
+
+  {% if words %}
+  <div class="word-grid">
+    {% for w in words %}
+    <article class="word-card">
+      <div class="word-index">{{ loop.index }}</div>
+      <h2 class="word-title">{{ w.word }}</h2>
+      <p class="word-meaning">{{ w.meaning }}</p>
+      {% set ex = (w.example or '')|trim %}
+      {% if ex and ex|lower != 'null' %}
+      <p class="word-example">{{ ex }}</p>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">출력할 단어가 없습니다.</div>
+  {% endif %}
+
+  <div class="toolbar">
+    <button class="btn" onclick="window.print()">인쇄 / PDF 저장</button>
+    <button class="btn" onclick="window.close()">창 닫기</button>
+  </div>
+
+  <script>
+    // 인쇄 창이 열리면 바로 출력 대화상자를 띄워 PDF 저장을 빠르게 진행한다.
+    window.addEventListener('load', function () {
+      // 긴 단어(또는 구문)가 카드 안에서 한 줄로 들어오도록 폰트를 자동 축소
+      document.querySelectorAll('.word-title').forEach(function (el) {
+        let size = 40;
+        const minSize = 16;
+        while (el.scrollWidth > el.clientWidth && size > minSize) {
+          size -= 1;
+          el.style.fontSize = size + 'px';
+        }
+      });
+
+      setTimeout(function () {
+        window.print();
+      }, 250);
+    });
+  </script>
+</body>
+</html>
