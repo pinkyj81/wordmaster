@@ -821,8 +821,11 @@ def get_words_by_text(text_id):
 def print_words(text_id):
     """Render a print-friendly page that users can save as PDF from the browser print dialog."""
     known_filter = request.args.get('known', 'all')
+    layout = request.args.get('layout', 'card')
     if known_filter not in {'all', 'exclude', 'only'}:
         known_filter = 'all'
+    if layout not in {'card', 'labeled'}:
+        layout = 'card'
 
     filter_sql = ''
     if known_filter == 'exclude':
@@ -852,8 +855,10 @@ def print_words(text_id):
         'only': '아는 단어만'
     }
 
+    template_name = 'word_print_labeled.html' if layout == 'labeled' else 'word_print.html'
+
     return render_template(
-        'word_print.html',
+        template_name,
         text_id=text_id,
         text_title=meta.title if meta else '(제목 없음)',
         source=meta.source if meta else '-',
