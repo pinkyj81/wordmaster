@@ -28,6 +28,16 @@
     </select>
   </div>
 
+  <!-- 문제 수 선택 -->
+  <div class="mb-4">
+    <label class="block mb-2 text-gray-700 font-medium">문제 수 선택</label>
+    <select id="questionCountSelector" class="border rounded px-3 py-2 w-full max-w-md">
+      <option value="10" selected>10문제</option>
+      <option value="20">20문제</option>
+      <option value="30">30문제</option>
+    </select>
+  </div>
+
   <!-- 시작 버튼 -->
   <button onclick="startSpellingTest()" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition font-semibold">
     시작하기
@@ -132,6 +142,7 @@ let startTime = null;
 let testTextId = '';
 let testTextTitle = '';
 let resultSaved = false;
+let selectedQuestionCount = 10;
 
 function filterTextsBySource() {
   const selectedSource = document.getElementById('sourceSelector').value;
@@ -153,6 +164,7 @@ function filterTextsBySource() {
 
 async function startSpellingTest() {
   const textId = document.getElementById('textSelector').value;
+  selectedQuestionCount = parseInt(document.getElementById('questionCountSelector').value, 10) || 10;
   
   if (!textId) {
     alert('텍스트를 선택하세요.');
@@ -160,7 +172,7 @@ async function startSpellingTest() {
   }
 
   try {
-    const response = await fetch(`/api/spelling_test/words/${textId}`);
+    const response = await fetch(`/api/spelling_test/words/${textId}?count=${selectedQuestionCount}`);
     const data = await response.json();
     
     // API 응답 구조 변경 반영
@@ -174,7 +186,7 @@ async function startSpellingTest() {
     }
 
     // 단어 개수 알림
-    if (totalUnlearned <= 10) {
+    if (totalUnlearned <= selectedQuestionCount) {
       alert(`암기하지 않은 단어가 총 ${totalUnlearned}개입니다.\n모든 단어가 출제됩니다.`);
     } else {
       console.log(`암기하지 않은 단어 ${totalUnlearned}개 중 랜덤으로 ${selectedCount}개 선택됨`);

@@ -1662,7 +1662,16 @@ def spelling_test():
 @app.route('/api/spelling_test/words/<text_id>')
 @login_required
 def get_spelling_test_words(text_id):
-    """텍스트 ID로 암기하지 않은 단어 중 랜덤 10개 가져오기"""
+    """텍스트 ID로 암기하지 않은 단어 중 선택한 개수(10/20/30)만큼 랜덤 출제"""
+    requested_count = request.args.get('count', '10')
+    try:
+        question_count = int(requested_count)
+    except (TypeError, ValueError):
+        question_count = 10
+
+    if question_count not in (10, 20, 30):
+        question_count = 10
+
     # 암기하지 않은 단어 총 개수 확인
     count_query = text("""
         SELECT COUNT(*) as total
@@ -1672,9 +1681,9 @@ def get_spelling_test_words(text_id):
     """)
     total_count = db.session.execute(count_query, {"text_id": text_id}).fetchone().total
     
-    # 랜덤으로 최대 10개 가져오기
-    query = text("""
-        SELECT TOP 10 id, word, meaning
+    # 랜덤으로 최대 question_count개 가져오기
+    query = text(f"""
+        SELECT TOP {question_count} id, word, meaning
         FROM words_rows
         WHERE text_id = :text_id 
         AND (is_learned IS NULL OR is_learned = 0)

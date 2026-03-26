@@ -81,16 +81,43 @@
     }
 
     .col-word {
-      width: 62%;
       font-size: 24px;
       line-height: 1.1;
       letter-spacing: -0.02em;
       font-weight: 500;
       color: #111827;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: clip;
+      padding-right: 12px;
+    }
+
+    .word-text {
+      display: inline-block;
+      max-width: 100%;
+    }
+
+    .col-index {
+      width: 56px;
+      min-width: 56px;
+      text-align: center;
+      padding-left: 4px;
+      padding-right: 4px;
+      font-size: 14px;
+      line-height: 1.2;
+      font-weight: 400;
+      color: #334155;
+    }
+
+    .col-index-head {
+      width: 56px;
+      min-width: 56px;
+      text-align: center;
+      padding-left: 4px;
+      padding-right: 4px;
     }
 
     .col-meaning {
-      width: 10%;
       font-size: 14px;
       line-height: 1.2;
       font-weight: 400;
@@ -98,7 +125,6 @@
     }
 
     .col-example {
-      width: 28%;
       font-size: 14px;
       line-height: 1.25;
       font-weight: 400;
@@ -178,8 +204,15 @@
 
     {% if words %}
     <table>
+      <colgroup>
+        <col style="width:56px;">
+        <col style="width:34%;">
+        <col style="width:28%;">
+        <col style="width:38%;">
+      </colgroup>
       <thead>
         <tr>
+          <th class="col-index-head">순번</th>
           <th>단어</th>
           <th>뜻</th>
           <th>예문</th>
@@ -189,7 +222,8 @@
         {% for w in words %}
         {% set ex = (w.example or '')|trim %}
         <tr>
-          <td class="col-word">{{ loop.index }}. {{ w.word }}</td>
+          <td class="col-index">{{ loop.index }}</td>
+          <td class="col-word"><span class="word-text">{{ w.word }}</span></td>
           <td class="col-meaning">{{ w.meaning }}</td>
           <td class="col-example{% if (not ex) or ex|lower == 'null' %} null{% endif %}">{{ ex if ex else 'NULL' }}</td>
         </tr>
@@ -207,11 +241,32 @@
   </div>
 
   <script>
+    function fitWordText() {
+      var minSize = 11;
+      var maxSize = 24;
+      var wordNodes = document.querySelectorAll('.col-word .word-text');
+
+      wordNodes.forEach(function (node) {
+        var parent = node.parentElement;
+        var size = maxSize;
+        node.style.fontSize = size + 'px';
+
+        while (size > minSize && node.scrollWidth > parent.clientWidth - 2) {
+          size -= 1;
+          node.style.fontSize = size + 'px';
+        }
+      });
+    }
+
     window.addEventListener('load', function () {
+      fitWordText();
       setTimeout(function () {
         window.print();
       }, 250);
     });
+
+    window.addEventListener('resize', fitWordText);
+    window.addEventListener('beforeprint', fitWordText);
   </script>
 </body>
 </html>
