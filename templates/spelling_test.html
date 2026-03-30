@@ -316,6 +316,7 @@ function checkAnswer() {
   } else {
     wrongCount++;
     wrongAnswers.push({
+      word: currentAnswer,
       meaning: words[currentIndex].meaning,
       correct: currentAnswer,
       user: userAnswer
@@ -338,6 +339,7 @@ function checkAnswer() {
 
 function skipQuestion() {
   wrongAnswers.push({
+    word: currentAnswer,
     meaning: words[currentIndex].meaning,
     correct: currentAnswer,
     user: '(건너뜀)'

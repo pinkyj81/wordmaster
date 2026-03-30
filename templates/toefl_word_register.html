@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2 class="text-2xl font-bold mb-4 text-gray-800">단어 등록 (엑셀 붙여넣기)</h2>
+<p class="text-gray-600 mb-4">엑셀에서 복사한 데이터를 그대로 붙여넣으면 <b>vacab_tofle</b> 테이블에 일괄 등록됩니다.</p>
+
+<div class="bg-white rounded-xl shadow border p-5">
+  <div class="mb-4">
+    <label class="block text-sm font-semibold text-gray-700 mb-1">공통 day_group</label>
+    <input id="defaultDayGroup" class="w-full md:w-72 border rounded-lg p-2" placeholder="예: day60">
+    <p class="text-xs text-gray-500 mt-1">여기에 입력한 day_group이 전체 행에 적용됩니다.</p>
+  </div>
+
+  <div class="mb-3 text-sm text-gray-600">
+    입력 순서: <b>word</b>, <b>pos</b>, <b>meaning_en</b>, <b>meaning_ko</b>, <b>example_sentence</b>, <b>is_known(선택)</b>
+    <span class="ml-2 text-blue-700">(no는 day_group별 자동 순번 등록)</span>
+  </div>
+
+  <textarea id="excelPasteInput" rows="14" class="w-full border rounded-lg p-3 font-mono text-sm"
+    placeholder="예시(탭 구분)&#10;benefit	n.	advantage	이점	Exercise has many health benefits.	0&#10;vivid	adj.	very clear	생생한	She gave a vivid description.	0"></textarea>
+
+  <div class="mt-4 flex gap-2">
+    <button id="parseBtn" class="px-4 py-2 bg-slate-600 text-white rounded hover:bg-slate-700">행 확인</button>
+    <button id="submitBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">DB 등록</button>
+    <button id="reloadRecentBtn" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">최근 등록 조회</button>
+  </div>
+
+  <div id="previewInfo" class="mt-4 text-sm text-gray-700"></div>
+  <div id="validationInfo" class="mt-2 text-sm"></div>
+
+  <div class="mt-3 overflow-x-auto">
+    <table class="min-w-full text-sm border" id="previewTable">
+      <thead class="bg-gray-100 hidden" id="previewHead">
+        <tr>
+          <th class="border px-2 py-1">#</th>
+          <th class="border px-2 py-1">day_group</th>
+          <th class="border px-2 py-1">no</th>
+          <th class="border px-2 py-1">word</th>
+          <th class="border px-2 py-1">pos</th>
+          <th class="border px-2 py-1">meaning_en</th>
+          <th class="border px-2 py-1">meaning_ko</th>
+          <th class="border px-2 py-1">example_sentence</th>
+          <th class="border px-2 py-1">is_known</th>
+          <th class="border px-2 py-1">검증</th>
+        </tr>
+      </thead>
+      <tbody id="previewBody"></tbody>
+    </table>
+  </div>
+
+  <div class="mt-8 border-t pt-4">
+    <h3 class="text-lg font-bold text-gray-800 mb-2">등록 후 확인 (DB)</h3>
+    <div id="recentInfo" class="text-sm text-gray-700 mb-2">아직 조회되지 않았습니다.</div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm border">
+        <thead class="bg-gray-100">
+          <tr>
+            <th class="border px-2 py-1">id</th>
+            <th class="border px-2 py-1">day_group</th>
+            <th class="border px-2 py-1">no</th>
+            <th class="border px-2 py-1">word</th>
+            <th class="border px-2 py-1">meaning_ko</th>
+            <th class="border px-2 py-1">created_at</th>
+          </tr>
+        </thead>
+        <tbody id="recentBody">
+          <tr><td colspan="6" class="border px-2 py-3 text-center text-gray-500">최근 등록 조회를 눌러 확인하세요.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  let parsedRows = [];
+  let parsedValidation = [];
+
+  function normalizeCell(value) {
+    return (value || '').toString().trim();
+  }
+
+  function isHeaderRow(cells) {
+    const joined = cells.join('|').toLowerCase();
+    return joined.includes('day_group') && joined.includes('meaning_en');
+  }
+
+  function parseRowsFromText(text) {
+    const defaultDayGroup = normalizeCell(document.getElementById('defaultDayGroup').value);
+    const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    const rows = [];
+
+    const looksLikeDayGroup = (value) => /^day\d+$/i.test(value || '');
+    const looksNumeric = (value) => /^\d+(\.\d+)?$/.test(value || '');
+
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i];
+      const cells = raw.includes('\t') ? raw.split('\t') : raw.split(',');
+      const cleaned = cells.map(normalizeCell);
+
+      if (cleaned.length < 5) {
+        continue;
+      }
+
+      if (i === 0 && isHeaderRow(cleaned)) {
+        continue;
+      }
+
+      // legacy: day_group, no, word, pos, meaning_en, meaning_ko, example_sentence, is_known?
+      if (cleaned.length >= 7 && looksLikeDayGroup(cleaned[0]) && looksNumeric(cleaned[1])) {
+        rows.push({
+          day_group: cleaned[0] || defaultDayGroup,
+          no: '',
+          word: cleaned[2] || '',
+          pos: cleaned[3] || '',
+          meaning_en: cleaned[4] || '',
+          meaning_ko: cleaned[5] || '',
+          example_sentence: cleaned[6] || '',
+          is_known: cleaned[7] || '0'
+        });
+      } else if (cleaned.length >= 6 && looksNumeric(cleaned[0])) {
+        // legacy: no, word, pos, meaning_en, meaning_ko, example_sentence, is_known?
+        rows.push({
+          day_group: defaultDayGroup,
+          no: '',
+          word: cleaned[1] || '',
+          pos: cleaned[2] || '',
+          meaning_en: cleaned[3] || '',
+          meaning_ko: cleaned[4] || '',
+          example_sentence: cleaned[5] || '',
+          is_known: cleaned[6] || '0'
+        });
+      } else {
+        // new: word, pos, meaning_en, meaning_ko, example_sentence, is_known?
+        rows.push({
+          day_group: defaultDayGroup,
+          no: '',
+          word: cleaned[0] || '',
+          pos: cleaned[1] || '',
+          meaning_en: cleaned[2] || '',
+          meaning_ko: cleaned[3] || '',
+          example_sentence: cleaned[4] || '',
+          is_known: cleaned[5] || '0'
+        });
+      }
+    }
+
+    return rows;
+  }
+
+  function renderPreview(rows) {
+    const head = document.getElementById('previewHead');
+    const body = document.getElementById('previewBody');
+    const info = document.getElementById('previewInfo');
+    const validationInfo = document.getElementById('validationInfo');
+
+    body.innerHTML = '';
+
+    if (!rows.length) {
+      head.classList.add('hidden');
+      info.textContent = '유효한 데이터가 없습니다. 엑셀에서 복사한 내용을 확인하세요.';
+      validationInfo.textContent = '';
+      return;
+    }
+
+    head.classList.remove('hidden');
+    info.textContent = `총 ${rows.length}행이 등록 대상입니다.`;
+
+    let errorCount = 0;
+    let warningCount = 0;
+
+    rows.forEach((r, idx) => {
+      const check = validateRow(r);
+      parsedValidation[idx] = check;
+
+      if (check.level === 'error') errorCount += 1;
+      if (check.level === 'warn') warningCount += 1;
+
+      const tr = document.createElement('tr');
+      if (check.level === 'error') tr.className = 'bg-red-50';
+      if (check.level === 'warn') tr.className = 'bg-yellow-50';
+
+      tr.innerHTML = `
+        <td class="border px-2 py-1">${idx + 1}</td>
+        <td class="border px-2 py-1">${r.day_group}</td>
+        <td class="border px-2 py-1 text-gray-500">자동</td>
+        <td class="border px-2 py-1">${r.word}</td>
+        <td class="border px-2 py-1">${r.pos}</td>
+        <td class="border px-2 py-1">${r.meaning_en}</td>
+        <td class="border px-2 py-1">${r.meaning_ko}</td>
+        <td class="border px-2 py-1">${r.example_sentence}</td>
+        <td class="border px-2 py-1">${r.is_known}</td>
+        <td class="border px-2 py-1 ${check.level === 'error' ? 'text-red-700' : check.level === 'warn' ? 'text-amber-700' : 'text-green-700'}">${check.message}</td>
+      `;
+      body.appendChild(tr);
+    });
+
+    validationInfo.innerHTML = `
+      <span class="text-green-700 font-semibold mr-3">정상 ${rows.length - errorCount - warningCount}행</span>
+      <span class="text-amber-700 font-semibold mr-3">주의 ${warningCount}행</span>
+      <span class="text-red-700 font-semibold">오류 ${errorCount}행</span>
+    `;
+  }
+
+  function validateRow(row) {
+    if (!row.day_group || !row.word) {
+      return { level: 'error', message: '필수값 누락' };
+    }
+
+    if ((row.word || '').includes(' ') && !(row.meaning_en || '').includes(' ')) {
+      return { level: 'warn', message: '칸 밀림 의심' };
+    }
+
+    if (!row.meaning_ko) {
+      return { level: 'warn', message: '뜻(한글) 비어있음' };
+    }
+
+    return { level: 'ok', message: '정상' };
+  }
+
+  async function loadRecentInserted() {
+    const dayGroup = normalizeCell(document.getElementById('defaultDayGroup').value);
+    const params = new URLSearchParams();
+    params.set('limit', '30');
+    if (dayGroup) params.set('day_group', dayGroup);
+
+    const info = document.getElementById('recentInfo');
+    const body = document.getElementById('recentBody');
+
+    info.textContent = '최근 등록 데이터를 불러오는 중...';
+
+    try {
+      const res = await fetch(`/api/toefl_words/recent?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || '조회 실패');
+      }
+
+      const items = data.items || [];
+      if (!items.length) {
+        body.innerHTML = '<tr><td colspan="6" class="border px-2 py-3 text-center text-gray-500">조회 결과가 없습니다.</td></tr>';
+        info.textContent = '조회 결과가 없습니다.';
+        return;
+      }
+
+      body.innerHTML = items.map((r) => `
+        <tr>
+          <td class="border px-2 py-1">${r.id}</td>
+          <td class="border px-2 py-1">${r.day_group || ''}</td>
+          <td class="border px-2 py-1">${r.no ?? ''}</td>
+          <td class="border px-2 py-1">${r.word || ''}</td>
+          <td class="border px-2 py-1">${r.meaning_ko || ''}</td>
+          <td class="border px-2 py-1">${r.created_at || ''}</td>
+        </tr>
+      `).join('');
+
+      info.textContent = `최근 ${items.length}행을 표시합니다.${dayGroup ? ` (day_group: ${dayGroup})` : ''}`;
+    } catch (err) {
+      info.textContent = `오류: ${err.message}`;
+      body.innerHTML = '<tr><td colspan="6" class="border px-2 py-3 text-center text-red-600">조회 중 오류가 발생했습니다.</td></tr>';
+    }
+  }
+
+  document.getElementById('parseBtn').addEventListener('click', () => {
+    const text = document.getElementById('excelPasteInput').value;
+    parsedRows = parseRowsFromText(text);
+    renderPreview(parsedRows);
+  });
+
+  document.getElementById('submitBtn').addEventListener('click', async () => {
+    if (!parsedRows.length) {
+      alert('먼저 행 확인을 눌러 데이터를 확인하세요.');
+      return;
+    }
+
+    const errorCount = parsedValidation.filter(v => v && v.level === 'error').length;
+    if (errorCount > 0) {
+      alert(`오류 ${errorCount}행이 있어 등록할 수 없습니다. 표의 검증 컬럼을 확인하세요.`);
+      return;
+    }
+
+    if (!confirm(`${parsedRows.length}행을 DB에 등록하시겠습니까?`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/toefl_words/bulk_insert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rows: parsedRows,
+          default_day_group: normalizeCell(document.getElementById('defaultDayGroup').value)
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || '등록 실패');
+      }
+
+      alert(`등록 완료: ${data.inserted}행`);
+      document.getElementById('excelPasteInput').value = '';
+      parsedRows = [];
+      parsedValidation = [];
+      renderPreview(parsedRows);
+      await loadRecentInserted();
+    } catch (err) {
+      alert(`오류: ${err.message}`);
+    }
+  });
+
+  document.getElementById('reloadRecentBtn').addEventListener('click', loadRecentInserted);
+</script>
+
+{% endblock %}

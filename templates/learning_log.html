@@ -154,8 +154,23 @@ function showWrongWords(data) {
     list.innerHTML = "<li class='text-gray-500'>모든 문제를 맞췄습니다!</li>";
   } else {
     data.forEach(w => {
+      const word = w.word || w.correct || '(단어 없음)';
+      const meaning = w.meaning || '';
+      const userInput = w.user || '';
+
       const li = document.createElement("li");
-      li.textContent = `${w.word} — ${w.meaning}`;
+      li.className = 'p-2 rounded bg-gray-50';
+
+      if (meaning && userInput) {
+        li.textContent = `${word} — ${meaning} (입력: ${userInput})`;
+      } else if (meaning) {
+        li.textContent = `${word} — ${meaning}`;
+      } else if (userInput) {
+        li.textContent = `${word} (입력: ${userInput})`;
+      } else {
+        li.textContent = word;
+      }
+
       list.appendChild(li);
     });
   }
