@@ -266,6 +266,152 @@ def text_records():
                            sources=user_sources)
 
 
+@app.route('/toefl_word_register')
+@login_required
+def toefl_word_register():
+    """엑셀 붙여넣기 기반 TOEFL 단어 일괄 등록 페이지"""
+    return render_template('toefl_word_register.html')
+
+
+@app.route('/api/toefl_words/bulk_insert', methods=['POST'])
+@login_required
+def bulk_insert_tofel_words():
+    """vacab_tofle 테이블에 단어 일괄 등록"""
+    payload = request.get_json(silent=True) or {}
+    rows = payload.get('rows', [])
+    default_day_group = str(payload.get('default_day_group', '')).strip()
+
+    if not isinstance(rows, list) or len(rows) == 0:
+        return jsonify({'ok': False, 'error': '등록할 데이터가 없습니다.'}), 400
+
+    cleaned_rows = []
+    for idx, row in enumerate(rows, start=1):
+        if not isinstance(row, dict):
+            return jsonify({'ok': False, 'error': f'{idx}번째 행 형식이 올바르지 않습니다.'}), 400
+
+        day_group = str(row.get('day_group', '')).strip() or default_day_group
+        word = str(row.get('word', '')).strip()
+        pos = str(row.get('pos', '')).strip()
+        meaning_en = str(row.get('meaning_en', '')).strip()
+        meaning_ko = str(row.get('meaning_ko', '')).strip()
+        example_sentence = str(row.get('example_sentence', '')).strip()
+        is_known_raw = str(row.get('is_known', '0')).strip()
+
+        if not day_group or not word:
+            return jsonify({'ok': False, 'error': f'{idx}번째 행의 필수값(day_group, word)이 비어 있습니다.'}), 400
+
+        try:
+            is_known = int(float(is_known_raw)) if is_known_raw else 0
+        except ValueError:
+            is_known = 0
+
+        cleaned_rows.append({
+            'day_group': day_group,
+            'word': word,
+            'pos': pos,
+            'meaning_en': meaning_en,
+            'meaning_ko': meaning_ko,
+            'example_sentence': example_sentence,
+            'is_known': 1 if is_known else 0,
+        })
+
+    try:
+        group_max_no = {}
+        for group in {r['day_group'] for r in cleaned_rows}:
+            max_no_sql = text("""
+                SELECT ISNULL(MAX(TRY_CAST(no AS INT)), 0) AS max_no
+                FROM vacab_tofle
+                WHERE day_group = :day_group
+            """)
+            max_no_row = db.session.execute(max_no_sql, {'day_group': group}).fetchone()
+            group_max_no[group] = int(max_no_row.max_no or 0)
+
+        rows_to_insert = []
+        for r in cleaned_rows:
+            group = r['day_group']
+            group_max_no[group] += 1
+            rows_to_insert.append({
+                'day_group': group,
+                'no': group_max_no[group],
+                'word': r['word'],
+                'pos': r['pos'],
+                'meaning_en': r['meaning_en'],
+                'meaning_ko': r['meaning_ko'],
+                'example_sentence': r['example_sentence'],
+                'is_known': r['is_known'],
+            })
+
+        insert_sql = text("""
+            INSERT INTO vacab_tofle
+                (day_group, no, word, pos, meaning_en, meaning_ko, example_sentence, created_at, is_known)
+            VALUES
+                (:day_group, :no, :word, :pos, :meaning_en, :meaning_ko, :example_sentence,
+                 DATEADD(hour, 9, SYSUTCDATETIME()), :is_known)
+        """)
+        db.session.execute(insert_sql, rows_to_insert)
+        db.session.commit()
+        return jsonify({'ok': True, 'inserted': len(rows_to_insert)})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/toefl_words/recent')
+@login_required
+def recent_tofel_words():
+    """최근 등록된 TOEFL 단어 조회(등록 검증용)"""
+    day_group = str(request.args.get('day_group', '')).strip()
+    limit_raw = str(request.args.get('limit', '30')).strip()
+
+    try:
+        limit = int(limit_raw)
+    except ValueError:
+        limit = 30
+
+    if limit < 1:
+        limit = 1
+    if limit > 100:
+        limit = 100
+
+    try:
+        if day_group:
+            query = text(f"""
+                SELECT TOP {limit}
+                    id, day_group, no, word, pos, meaning_en, meaning_ko, example_sentence, created_at, is_known
+                FROM vacab_tofle
+                WHERE day_group = :day_group
+                ORDER BY created_at DESC, id DESC
+            """)
+            rows = db.session.execute(query, {'day_group': day_group}).fetchall()
+        else:
+            query = text(f"""
+                SELECT TOP {limit}
+                    id, day_group, no, word, pos, meaning_en, meaning_ko, example_sentence, created_at, is_known
+                FROM vacab_tofle
+                ORDER BY created_at DESC, id DESC
+            """)
+            rows = db.session.execute(query).fetchall()
+
+        items = [
+            {
+                'id': r.id,
+                'day_group': r.day_group,
+                'no': r.no,
+                'word': r.word,
+                'pos': r.pos,
+                'meaning_en': r.meaning_en,
+                'meaning_ko': r.meaning_ko,
+                'example_sentence': r.example_sentence,
+                'created_at': str(r.created_at),
+                'is_known': r.is_known,
+            }
+            for r in rows
+        ]
+        return jsonify({'ok': True, 'items': items})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+
 
 
 
