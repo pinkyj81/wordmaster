@@ -526,7 +526,7 @@ def word_management():
 def learning_log():
     q = request.args.get('q', '').strip()
     selected_user = request.args.get('user_name', '').strip()
-    view_all = request.args.get('view_all', '0') == '1'
+    view_all = request.args.get('view_all', '1') == '1'
     user_id = session.get('db_user_id')
     is_admin = session.get('is_admin', False)
     
@@ -538,8 +538,8 @@ def learning_log():
     # user_id를 user_name으로 매핑 (user_id가 이미 이름이므로 그대로 사용)
     user_map = {u['user_id']: u['name'] for u in USERS}
     
-    # 관리자가 전체 보기를 선택한 경우
-    show_all = is_admin and view_all
+    # 전체 보기 선택 여부 (모든 사용자 가능)
+    show_all = view_all
     
     print(f"DEBUG: user_id={user_id}, is_admin={is_admin}, view_all={view_all}, show_all={show_all}")
 
@@ -555,11 +555,11 @@ def learning_log():
 
             summary_query = text("""
                 SELECT 
-                    LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1) AS test_name, 
+                    user_id, 
                     COUNT(*) AS test_count
                 FROM test_records_rows
                 WHERE test_name LIKE :q
-                GROUP BY LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1)
+                GROUP BY user_id
                 ORDER BY test_count DESC
             """)
             summary_rows = db.session.execute(summary_query, {"q": f"%{q}%"}).fetchall()
@@ -574,11 +574,11 @@ def learning_log():
 
             summary_query = text("""
                 SELECT 
-                    LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1) AS test_name, 
+                    user_id, 
                     COUNT(*) AS test_count
                 FROM test_records_rows
                 WHERE test_name LIKE :q AND user_id = :user_id
-                GROUP BY LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1)
+                GROUP BY user_id
                 ORDER BY test_count DESC
             """)
             summary_rows = db.session.execute(summary_query, {"q": f"%{q}%", "user_id": user_id}).fetchall()
@@ -593,10 +593,10 @@ def learning_log():
 
             summary_query = text("""
                 SELECT 
-                    LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1) AS test_name, 
+                    user_id, 
                     COUNT(*) AS test_count
                 FROM test_records_rows
-                GROUP BY LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1)
+                GROUP BY user_id
                 ORDER BY test_count DESC
             """)
             summary_rows = db.session.execute(summary_query).fetchall()
@@ -611,16 +611,16 @@ def learning_log():
 
             summary_query = text("""
                 SELECT 
-                    LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1) AS test_name, 
+                    user_id, 
                     COUNT(*) AS test_count
                 FROM test_records_rows
                 WHERE user_id = :user_id
-                GROUP BY LEFT(test_name, CHARINDEX(' 테스트', test_name + ' 테스트') - 1)
+                GROUP BY user_id
                 ORDER BY test_count DESC
             """)
             summary_rows = db.session.execute(summary_query, {"user_id": user_id}).fetchall()
 
-    summary = [{"test_name": r.test_name, "test_count": r.test_count} for r in summary_rows]
+    summary = [{"test_name": user_map.get(r.user_id, f'User {r.user_id}'), "test_count": r.test_count} for r in summary_rows]
 
     # distinct test names for datalist/autocomplete
     if show_all:
