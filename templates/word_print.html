@@ -45,8 +45,8 @@
     .word-card {
       border: 2px solid #9ca3af;
       border-radius: 24px;
-      padding: 20px 22px;
-      min-height: 150px;
+      padding: 12px 18px;
+      min-height: 110px;
       page-break-inside: avoid;
       background: #ffffff;
       position: relative;
@@ -55,7 +55,7 @@
     .word-index {
       position: absolute;
       top: 8px;
-      left: 12px;
+      right: 12px;
       font-size: 12px;
       color: #6b7280;
       font-weight: 600;
@@ -137,10 +137,6 @@
       <div class="word-index">{{ loop.index }}</div>
       <h2 class="word-title">{{ w.word }}</h2>
       <p class="word-meaning">{{ w.meaning }}</p>
-      {% set ex = (w.example or '')|trim %}
-      {% if ex and ex|lower != 'null' %}
-      <p class="word-example">{{ ex }}</p>
-      {% endif %}
     </article>
     {% endfor %}
   </div>
