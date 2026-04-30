@@ -4,7 +4,7 @@
 <h2 class="text-3xl font-bold mb-6 text-gray-800">📝 스펠링 테스트</h2>
 
 <div class="mb-6">
-  <p class="text-gray-600 mb-4">한글 뜻을 보고 영어 단어를 스펠링하세요. 첫 글자는 힌트로 제공됩니다.</p>
+  <p class="text-gray-600 mb-4">Definition 또는 Sample sentence를 보고 영어 단어를 스펠링하세요. 첫 글자는 힌트로 제공됩니다.</p>
 
   <!-- 출처 선택 -->
   <div class="mb-4">
@@ -38,6 +38,21 @@
     </select>
   </div>
 
+  <!-- 문제 유형 선택 -->
+  <div class="mb-4">
+    <label class="block mb-2 text-gray-700 font-medium">문제 유형</label>
+    <div class="flex gap-5 items-center text-gray-700">
+      <label class="inline-flex items-center gap-2">
+        <input type="radio" name="promptMode" value="definition" checked>
+        <span>Definition </span>
+      </label>
+      <label class="inline-flex items-center gap-2">
+        <input type="radio" name="promptMode" value="sentence">
+        <span>Sample sentence </span>
+      </label>
+    </div>
+  </div>
+
   <!-- 시작 버튼 -->
   <button onclick="startSpellingTest()" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition font-semibold">
     시작하기
@@ -60,7 +75,7 @@
 
     <!-- 문제 -->
     <div class="text-center mb-8">
-      <p class="text-gray-500 text-sm mb-2">뜻</p>
+      <p id="promptLabel" class="text-gray-500 text-sm mb-2">Definition</p>
       <h3 id="meaningText" class="text-3xl font-bold text-gray-800 mb-6">사과</h3>
       
       <!-- 스펠링 입력 칸 -->
@@ -143,6 +158,12 @@ let testTextId = '';
 let testTextTitle = '';
 let resultSaved = false;
 let selectedQuestionCount = 10;
+let promptMode = 'definition';
+
+function getSelectedPromptMode() {
+  const selected = document.querySelector('input[name="promptMode"]:checked');
+  return selected ? selected.value : 'definition';
+}
 
 function filterTextsBySource() {
   const selectedSource = document.getElementById('sourceSelector').value;
@@ -165,6 +186,7 @@ function filterTextsBySource() {
 async function startSpellingTest() {
   const textId = document.getElementById('textSelector').value;
   selectedQuestionCount = parseInt(document.getElementById('questionCountSelector').value, 10) || 10;
+  promptMode = getSelectedPromptMode();
   
   if (!textId) {
     alert('텍스트를 선택하세요.');
@@ -233,8 +255,21 @@ function showQuestion() {
   const progress = ((currentIndex) / words.length) * 100;
   document.getElementById('progressBar').style.width = progress + '%';
   
-  // 뜻 표시
-  document.getElementById('meaningText').textContent = word.meaning;
+  // 문제 표시 (Definition / Sample sentence)
+  const promptLabelEl = document.getElementById('promptLabel');
+  const promptTextEl = document.getElementById('meaningText');
+  if (promptMode === 'sentence') {
+    const sentenceText = (word.example || '').trim();
+    promptLabelEl.textContent = sentenceText ? 'Sample sentence' : 'Definition';
+    promptTextEl.textContent = sentenceText || (word.meaning || '');
+    promptTextEl.className = sentenceText
+      ? 'text-xl font-bold text-gray-800 mb-6 leading-relaxed'
+      : 'text-3xl font-bold text-gray-800 mb-6';
+  } else {
+    promptLabelEl.textContent = 'Definition';
+    promptTextEl.textContent = word.meaning || '';
+    promptTextEl.className = 'text-3xl font-bold text-gray-800 mb-6';
+  }
   
   // 입력 칸 생성 (첫 글자는 힌트로 표시)
   const letterBoxes = document.getElementById('letterBoxes');
@@ -318,6 +353,8 @@ function checkAnswer() {
     wrongAnswers.push({
       word: currentAnswer,
       meaning: words[currentIndex].meaning,
+      example: words[currentIndex].example || '',
+      prompt_mode: promptMode,
       correct: currentAnswer,
       user: userAnswer
     });
@@ -341,6 +378,8 @@ function skipQuestion() {
   wrongAnswers.push({
     word: currentAnswer,
     meaning: words[currentIndex].meaning,
+    example: words[currentIndex].example || '',
+    prompt_mode: promptMode,
     correct: currentAnswer,
     user: '(건너뜀)'
   });
@@ -371,10 +410,15 @@ async function showResult() {
     wrongList.innerHTML = '';
     
     wrongAnswers.forEach(item => {
+      const promptTitle = item.prompt_mode === 'sentence' ? 'Sample sentence' : 'Definition';
+      const promptValue = item.prompt_mode === 'sentence'
+        ? (item.example || item.meaning || '')
+        : (item.meaning || '');
       const div = document.createElement('div');
       div.className = 'p-3 bg-red-50 rounded-lg';
       div.innerHTML = `
-        <div class="font-bold text-gray-800">${item.meaning}</div>
+        <div class="text-xs text-gray-500 mb-1">${promptTitle}</div>
+        <div class="font-bold text-gray-800">${promptValue}</div>
         <div class="text-sm text-gray-600">정답: <span class="text-green-600 font-bold">${item.correct}</span></div>
         <div class="text-sm text-gray-600">입력: <span class="text-red-600 font-bold">${item.user}</span></div>
       `;

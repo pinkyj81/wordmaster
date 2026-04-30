@@ -207,9 +207,29 @@
     <option value="">본문을 선택하세요</option>
   </select>
 
-  <label class="block text-sm font-semibold text-gray-700 mb-1">단어 목록 (한 줄당 하나씩)</label>
-  <textarea id="bulkWordInput" rows="8" class="w-full border rounded-lg p-3 mb-6"
-    placeholder="예시:&#10;glyph	상형문자&#10;haphazard	계획성이 없는&#10;hereditary	유전의"></textarea>
+  <label class="block text-sm font-semibold text-gray-700 mb-1">단어 목록 (한 줄당 하나씩, 탭 구분)</label>
+  <p class="text-xs text-gray-500 mb-1">형식: <b>단어 [탭] 뜻 [탭] 예문(선택)</b></p>
+  <textarea id="bulkWordInput" rows="8" class="w-full border rounded-lg p-3 mb-3"
+    oninput="previewBulkWords()"
+    placeholder="예시:&#10;glyph&#9;상형문자&#9;The glyphs on the wall tell a story.&#10;haphazard&#9;계획성이 없는&#9;The work was done in a haphazard manner.&#10;hereditary&#9;유전의"></textarea>
+
+  <!-- 미리보기 -->
+  <div id="bulkPreviewWrap" class="hidden mb-4">
+    <p class="text-sm font-semibold text-gray-700 mb-1">입력된 단어 미리보기 <span id="bulkPreviewCount" class="text-gray-500 font-normal"></span></p>
+    <div class="overflow-x-auto max-h-48 overflow-y-auto border rounded">
+      <table class="min-w-full text-sm">
+        <thead class="bg-gray-100 sticky top-0">
+          <tr>
+            <th class="border px-2 py-1 text-left">#</th>
+            <th class="border px-2 py-1 text-left">단어</th>
+            <th class="border px-2 py-1 text-left">뜻</th>
+            <th class="border px-2 py-1 text-left">예문</th>
+          </tr>
+        </thead>
+        <tbody id="bulkPreviewBody"></tbody>
+      </table>
+    </div>
+  </div>
 
   <div class="flex justify-end space-x-2">
     <button onclick="closeUploadModal()" class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400">취소</button>
@@ -316,6 +336,46 @@
       .catch(() => alert('❌ 업로드 중 오류 발생'));
     }
 
+    // 단어 목록 파싱 헬퍼
+    function parseBulkWordLines(rawList) {
+      return rawList.split('\n').map(line => {
+        const parts = line.trim().split(/\t/);
+        if (parts.length >= 2) {
+          return {
+            word: parts[0].trim(),
+            meaning: parts[1].trim(),
+            example: parts[2] ? parts[2].trim() : ''
+          };
+        }
+        // 탭 없을 경우 공백으로 시도 (예문 없음)
+        const [word, ...rest] = line.trim().split(/\s+/);
+        return word && rest.length ? { word, meaning: rest.join(' '), example: '' } : null;
+      }).filter(Boolean);
+    }
+
+    // ✅ 미리보기 렌더링
+    function previewBulkWords() {
+      const rawList = document.getElementById('bulkWordInput').value.trim();
+      const wrap = document.getElementById('bulkPreviewWrap');
+      const body = document.getElementById('bulkPreviewBody');
+      const countEl = document.getElementById('bulkPreviewCount');
+
+      if (!rawList) { wrap.classList.add('hidden'); return; }
+
+      const words = parseBulkWordLines(rawList);
+      if (!words.length) { wrap.classList.add('hidden'); return; }
+
+      wrap.classList.remove('hidden');
+      countEl.textContent = `(${words.length}개)`;
+      body.innerHTML = words.map((w, i) => `
+        <tr class="${i % 2 === 0 ? '' : 'bg-gray-50'}">
+          <td class="border px-2 py-1 text-gray-500">${i + 1}</td>
+          <td class="border px-2 py-1 font-medium">${w.word}</td>
+          <td class="border px-2 py-1">${w.meaning}</td>
+          <td class="border px-2 py-1 text-gray-600 italic">${w.example || ''}</td>
+        </tr>`).join('');
+    }
+
     // ✅ 단어 일괄 업로드
     function submitBulkWords() {
       const textId = document.getElementById('wordTextSelect').value;
@@ -324,17 +384,7 @@
       if (!textId) return alert('본문을 선택해주세요.');
       if (!rawList) return alert('단어 목록을 입력해주세요.');
 
-      // 단어 목록 파싱 (탭 또는 공백으로 구분)
-      const words = rawList.split('\n').map(line => {
-        const parts = line.trim().split(/\t+/);
-        if (parts.length >= 2) {
-          return { word: parts[0].trim(), meaning: parts.slice(1).join(' ').trim() };
-        }
-        // 탭이 없으면 공백으로 시도
-        const [word, ...rest] = line.trim().split(/\s+/);
-        return word && rest.length ? { word, meaning: rest.join(' ') } : null;
-      }).filter(Boolean);
-
+      const words = parseBulkWordLines(rawList);
       if (words.length === 0) return alert('올바른 형식으로 단어를 입력해주세요.');
 
       fetch('/upload_words', {
@@ -725,19 +775,17 @@ function mgmtDeleteWord(wordId) {
   if (!confirm('이 단어를 삭제하시겠습니까?')) return;
   
   fetch(`/delete_word/${wordId}`, { method: 'DELETE' })
-    .then(res => res.json())
-    .then(data => {
-      if (data.success || data.ok) {
-        alert('삭제되었습니다');
-        const textId = document.getElementById('mgmtTextSelector').value;
-        mgmtLoadWordsByText(); // 목록 새로고침
-      } else {
-        alert('삭제에 실패했습니다');
+    .then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !(data.success || data.ok)) {
+        throw new Error(data.error || data.message || '삭제에 실패했습니다');
       }
+      alert(data.message || '삭제되었습니다');
+      mgmtLoadWordsByText(); // 목록 새로고침
     })
     .catch(err => {
       console.error('삭제 실패:', err);
-      alert('삭제 중 오류가 발생했습니다');
+      alert(err.message || '삭제 중 오류가 발생했습니다');
     });
 }
 
