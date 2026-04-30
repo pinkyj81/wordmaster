@@ -92,7 +92,7 @@ class WordsRow(db.Model):
     added_at = db.Column(db.String)
     created_at = db.Column(db.String)
     updated_at = db.Column(db.String)
-    example = db.Column(db.String)
+    example = db.Column('sentence', db.String)
     exam_korean = db.Column(db.String)
     language = db.Column(db.String, default='english')
     pronunciation = db.Column(db.String)
@@ -684,7 +684,7 @@ def word_search():
     # 검색 조건 생성
     if search_type == 'word':
         sql_query = text("""
-            SELECT id, word, meaning, exam_korean, example, is_learned, 
+            SELECT id, word, meaning, exam_korean, sentence AS example, is_learned, 
                    text_id, text_title, created_at
             FROM words_rows
             WHERE word LIKE :query
@@ -693,7 +693,7 @@ def word_search():
         params = {"query": f"%{search_query}%"}
     elif search_type == 'meaning':
         sql_query = text("""
-            SELECT id, word, meaning, exam_korean, example, is_learned, 
+            SELECT id, word, meaning, exam_korean, sentence AS example, is_learned, 
                    text_id, text_title, created_at
             FROM words_rows
             WHERE meaning LIKE :query
@@ -702,7 +702,7 @@ def word_search():
         params = {"query": f"%{search_query}%"}
     else:  # all
         sql_query = text("""
-            SELECT id, word, meaning, exam_korean, example, is_learned, 
+            SELECT id, word, meaning, exam_korean, sentence AS example, is_learned, 
                    text_id, text_title, created_at
             FROM words_rows
             WHERE word LIKE :query OR meaning LIKE :query
@@ -732,7 +732,7 @@ def api_search_words():
     # 검색 조건 생성
     if search_type == 'word':
         sql_query = text("""
-            SELECT id, word, meaning, exam_korean, example, is_learned, 
+            SELECT id, word, meaning, exam_korean, sentence AS example, is_learned, 
                    text_id, text_title, created_at
             FROM words_rows
             WHERE word LIKE :query
@@ -741,7 +741,7 @@ def api_search_words():
         params = {"query": f"%{search_query}%"}
     elif search_type == 'meaning':
         sql_query = text("""
-            SELECT id, word, meaning, exam_korean, example, is_learned, 
+            SELECT id, word, meaning, exam_korean, sentence AS example, is_learned, 
                    text_id, text_title, created_at
             FROM words_rows
             WHERE meaning LIKE :query
@@ -750,7 +750,7 @@ def api_search_words():
         params = {"query": f"%{search_query}%"}
     else:  # all
         sql_query = text("""
-            SELECT id, word, meaning, exam_korean, example, is_learned, 
+            SELECT id, word, meaning, exam_korean, sentence AS example, is_learned, 
                    text_id, text_title, created_at
             FROM words_rows
             WHERE word LIKE :query OR meaning LIKE :query
@@ -823,7 +823,7 @@ def update_words():
                 UPDATE words_rows
                 SET word = :word, 
                     meaning = :meaning,
-                    example = :example,
+                    sentence = :example,
                     exam_korean = :exam_korean,
                     is_learned = :is_learned,
                     updated_at = DATEADD(hour, 9, SYSUTCDATETIME())
@@ -893,7 +893,7 @@ def upload_words():
             insert_query = text("""
                 INSERT INTO words_rows
                     (id, word, meaning, is_learned, text_id, text_title,
-                     added_at, created_at, updated_at, example, exam_korean)
+                     added_at, created_at, updated_at, sentence, exam_korean)
                 VALUES
                     (:id, :word, :meaning, :is_learned, :text_id, :text_title,
                      :now, :now, :now, :example, :exam_korean)
@@ -946,7 +946,7 @@ def get_text_titles():
 @app.route('/get_words_by_text/<text_id>')
 def get_words_by_text(text_id):
     query = text("""
-        SELECT id, word, meaning, ISNULL(is_learned, 0) AS is_learned, example, exam_korean
+        SELECT id, word, meaning, ISNULL(is_learned, 0) AS is_learned, sentence AS example, exam_korean
         FROM words_rows
         WHERE text_id = :text_id
         ORDER BY word ASC
@@ -980,7 +980,7 @@ def print_words(text_id):
         filter_sql = 'AND ISNULL(is_learned, 0) = 1'
 
     words_query = text(f"""
-        SELECT word, meaning, example, ISNULL(is_learned, 0) AS is_learned
+        SELECT word, meaning, sentence AS example, ISNULL(is_learned, 0) AS is_learned
         FROM words_rows
         WHERE text_id = :text_id
         {filter_sql}
@@ -1034,7 +1034,7 @@ def update_word():
         UPDATE words_rows
         SET word = :word,
             meaning = :meaning,
-            example = :example,
+            sentence = :example,
             is_learned = :is_learned,
             updated_at = DATEADD(hour, 9, SYSUTCDATETIME())
         WHERE id = :id
@@ -1045,10 +1045,18 @@ def update_word():
 # ✅ 단어 삭제
 @app.route('/delete_word/<word_id>', methods=['DELETE'])
 def delete_word(word_id):
-    query = text("DELETE FROM words_rows WHERE id = :id")
-    db.session.execute(query, {"id": word_id})
-    db.session.commit()
-    return jsonify({"message": "단어가 삭제되었습니다."})
+    try:
+        query = text("DELETE FROM words_rows WHERE id = :id")
+        result = db.session.execute(query, {"id": word_id})
+        db.session.commit()
+
+        if result.rowcount and result.rowcount > 0:
+            return jsonify({"ok": True, "success": True, "message": "단어가 삭제되었습니다."})
+
+        return jsonify({"ok": False, "success": False, "error": "삭제할 단어를 찾지 못했습니다."}), 404
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"ok": False, "success": False, "error": str(e)}), 500
 
 @app.route('/get_sources')
 @login_required
@@ -1829,7 +1837,7 @@ def get_spelling_test_words(text_id):
     
     # 랜덤으로 최대 question_count개 가져오기
     query = text(f"""
-        SELECT TOP {question_count} id, word, meaning
+        SELECT TOP {question_count} id, word, meaning, sentence AS example
         FROM words_rows
         WHERE text_id = :text_id 
         AND (is_learned IS NULL OR is_learned = 0)
@@ -1842,6 +1850,7 @@ def get_spelling_test_words(text_id):
         "id": r.id,
         "word": r.word.strip().lower(),  # 소문자로 통일
         "meaning": r.meaning,
+        "example": (r.example or '').strip(),
         "length": len(r.word.strip())
     } for r in results if r.word and r.word.strip()]
     
