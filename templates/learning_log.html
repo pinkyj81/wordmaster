@@ -5,7 +5,7 @@
 
   <!-- ✅ 테스트 횟수 요약 그래프 -->
   <div class="bg-white p-6 rounded-xl shadow mb-8">
-    <h3 class="text-lg font-semibold mb-4 text-gray-700">텍스트별 테스트 횟수</h3>
+    <h3 class="text-lg font-semibold mb-4 text-gray-700">사용자별 테스트 횟수</h3>
     <canvas id="testCountChart" height="120"></canvas>
   </div>
 
@@ -13,14 +13,12 @@
   <div class="bg-white p-6 rounded-xl shadow">
     <div class="flex justify-between items-center mb-4">
       <h3 class="text-lg font-semibold text-gray-700">상세 기록</h3>
-      {% if is_admin %}
-        <div class="flex items-center gap-2">
-          <label class="text-sm text-gray-600">전체 사용자 보기:</label>
-          <input type="checkbox" id="viewAllToggle" {% if view_all %}checked{% endif %} 
-                 onchange="toggleViewAll(this.checked)" 
-                 class="w-5 h-5 text-blue-600 cursor-pointer">
-        </div>
-      {% endif %}
+      <div class="flex items-center gap-2">
+        <label class="text-sm text-gray-600">전체 사용자 보기:</label>
+        <input type="checkbox" id="viewAllToggle" {% if view_all %}checked{% endif %} 
+               onchange="toggleViewAll(this.checked)" 
+               class="w-5 h-5 text-blue-600 cursor-pointer">
+      </div>
     </div>
 
     <!-- 검색 (텍스트 제목으로) -->

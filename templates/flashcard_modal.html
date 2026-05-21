@@ -30,7 +30,8 @@
                 bg-gradient-to-br from-[#5C6BF6] to-[#7D84FF]
                 w-full h-full rounded-3xl flex flex-col justify-center items-center">
       <p id="wordBack" class="text-5xl font-bold tracking-tight mb-4 text-white"></p>
-      <p id="meaning" class="text-2xl font-medium text-white/90"></p>
+      <p id="meaning" class="text-2xl font-medium text-white/90 text-center max-w-xl px-6 leading-snug line-clamp-2"></p>
+      <p id="sentence" class="mt-3 text-2xl font-medium text-white/90 text-center max-w-2xl px-8 leading-relaxed"></p>
 
       <!-- ✅ 발음 듣기 버튼 (이벤트 버블링 방지 포함) -->
       <button
@@ -107,6 +108,8 @@ function showCard() {
   document.getElementById("word").innerText = card.word;
   document.getElementById("wordBack").innerText = card.word;
   document.getElementById("meaning").innerText = card.meaning;
+  const sentenceText = (card.sentence || '').trim();
+  document.getElementById("sentence").innerText = sentenceText ? `[${sentenceText}]` : '';
   document.getElementById("progressCount").innerText = `${currentIndex + 1} / ${cards.length}`;
 
   // 초기화 (앞면으로)
