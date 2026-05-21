@@ -226,11 +226,20 @@ LEFT JOIN (
 
 LEFT JOIN (
     SELECT
-        LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1) AS text_id,
+        CASE
+            WHEN CHARINDEX(' ', test_name + ' ') > 1 THEN LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1)
+            WHEN PATINDEX('%[^0-9]%', test_name) > 1 THEN LEFT(test_name, PATINDEX('%[^0-9]%', test_name) - 1)
+            ELSE test_name
+        END AS text_id,
         COUNT(*) AS test_count
     FROM test_records_rows
     WHERE user_id = :current_user_id
-    GROUP BY LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1)
+    GROUP BY
+        CASE
+            WHEN CHARINDEX(' ', test_name + ' ') > 1 THEN LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1)
+            WHEN PATINDEX('%[^0-9]%', test_name) > 1 THEN LEFT(test_name, PATINDEX('%[^0-9]%', test_name) - 1)
+            ELSE test_name
+        END
 ) tc ON t.id = tc.text_id
 
 WHERE t.source IN ({source_placeholders})
@@ -491,7 +500,15 @@ def flashcards(text_id):
     words = WordsRow.query.filter_by(text_id=text_id).filter(
         or_(WordsRow.is_learned == False, WordsRow.is_learned.is_(None))
     ).all()
-    word_list = [{"word": w.word, "meaning": w.meaning, "text_title": w.text_title} for w in words]
+    word_list = [
+        {
+            "word": w.word,
+            "meaning": w.meaning,
+            "text_title": w.text_title,
+            "sentence": w.example or "",
+        }
+        for w in words
+    ]
     return render_template('flashcard_modal.html', words=word_list, text_id=text_id)
 
 
@@ -505,7 +522,18 @@ def refresh_text_counts(text_id):
     # 현재 로그인한 사용자의 테스트 기록만 카운트
     current_user_id = session.get('db_user_id', session.get('user_name', 'Unknown'))
     tc_row = db.session.execute(
-        text("SELECT COUNT(*) AS cnt FROM test_records_rows WHERE LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1) = :text_id AND user_id = :user_id"),
+        text("""
+            SELECT COUNT(*) AS cnt
+            FROM test_records_rows
+            WHERE (
+                CASE
+                    WHEN CHARINDEX(' ', test_name + ' ') > 1 THEN LEFT(test_name, CHARINDEX(' ', test_name + ' ') - 1)
+                    WHEN PATINDEX('%[^0-9]%', test_name) > 1 THEN LEFT(test_name, PATINDEX('%[^0-9]%', test_name) - 1)
+                    ELSE test_name
+                END
+            ) = :text_id
+            AND user_id = :user_id
+        """),
         {"text_id": text_id, "user_id": current_user_id}
     ).fetchone()
     test_count = tc_row.cnt if hasattr(tc_row, 'cnt') else (tc_row[0] if tc_row else 0)
@@ -773,9 +801,23 @@ def api_search_words():
 
 
 # ✅ 발음 듣기 (미국식)
+
+# ✅ 발음 듣기 (언어 자동 감지: 영어/중국어/일본어)
 @app.route('/tts/<word>')
 def tts(word):
-    tts = gTTS(word, lang='en', tld='com')
+    # 단어의 언어 감지 (DB에서)
+    from sqlalchemy import or_
+    w = db.session.query(WordsRow).filter(or_(WordsRow.word == word, WordsRow.word == word.strip())).first()
+    lang = 'en'
+    tld = 'com'
+    if w and hasattr(w, 'language'):
+        if w.language == 'chinese':
+            lang = 'zh-cn'
+            tld = 'com.cn'
+        elif w.language == 'japanese':
+            lang = 'ja'
+            tld = 'co.jp'
+    tts = gTTS(word, lang=lang, tld=tld)
     mp3_fp = io.BytesIO()
     tts.write_to_fp(mp3_fp)
     mp3_fp.seek(0)
