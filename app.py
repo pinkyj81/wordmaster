@@ -145,36 +145,29 @@ class WordUser(db.Model):
 # ✅ 로그인 페이지
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.method == 'POST':
-        selected_name = request.form.get('user_id')
-        
-        # word_users에서 해당 사용자가 있는지 확인
-        user_exists = db.session.execute(
-            text("SELECT COUNT(*) as cnt FROM word_users WHERE user_name = :name"),
-            {"name": selected_name}
-        ).fetchone()
-        
-        if user_exists and user_exists.cnt > 0:
-            # USERS 리스트에서 관리자 정보 확인 (없으면 일반 사용자)
-            static_user = next((u for u in USERS if u['name'] == selected_name), None)
-            is_admin = static_user.get('is_admin', False) if static_user else False
-            
-            session['user_id'] = f"user_{selected_name}"
-            session['user_name'] = selected_name
-            session['db_user_id'] = selected_name  # DB에 저장될 user_id (문자열)
-            session['is_admin'] = is_admin
-            return redirect(url_for('index'))
-        else:
-            # word_users에 등록된 사용자 목록 조회
-            registered_users_query = text("SELECT DISTINCT user_name FROM word_users ORDER BY user_name")
-            registered_names = [r.user_name for r in db.session.execute(registered_users_query).fetchall()]
-            return render_template('login.html', users=registered_names, error='사용자를 선택하세요.')
-    
-    # word_users에 등록된 사용자 목록 조회
+    # 정적 사용자 + DB 등록 사용자 목록을 합쳐 로그인 선택지로 사용
+    static_names = [u['name'] for u in USERS if u.get('name')]
     registered_users_query = text("SELECT DISTINCT user_name FROM word_users ORDER BY user_name")
-    registered_names = [r.user_name for r in db.session.execute(registered_users_query).fetchall()]
-    
-    return render_template('login.html', users=registered_names)
+    registered_names = [r.user_name for r in db.session.execute(registered_users_query).fetchall() if r.user_name]
+    available_names = sorted(set(static_names + registered_names), key=lambda value: value.lower())
+
+    if request.method == 'POST':
+        selected_name = (request.form.get('user_id') or '').strip()
+
+        if not selected_name:
+            return render_template('login.html', users=available_names, error='사용자를 선택하세요.')
+
+        # USERS 리스트에서 관리자 정보 확인 (없으면 일반 사용자)
+        static_user = next((u for u in USERS if u['name'] == selected_name), None)
+        is_admin = static_user.get('is_admin', False) if static_user else False
+
+        session['user_id'] = f"user_{selected_name}"
+        session['user_name'] = selected_name
+        session['db_user_id'] = selected_name  # DB에 저장될 user_id (문자열)
+        session['is_admin'] = is_admin
+        return redirect(url_for('index'))
+
+    return render_template('login.html', users=available_names)
 
 # ✅ 로그아웃
 @app.route('/logout')
@@ -891,19 +884,116 @@ def update_words():
 # ✅ 텍스트 업로드
 @app.route('/upload_text', methods=['POST'])
 def upload_text():
-    data = request.get_json()
-    title = data.get('title', '')
-    source = data.get('source', '')
-    content = data.get('content', '')
-    record_id = title.split(' ')[0][:4]
+    try:
+        data = request.get_json() or {}
+        title = (data.get('title') or '').strip()
+        source = (data.get('source') or '').strip()
+        content = (data.get('content') or '').strip()
 
-    query = text("""
-        INSERT INTO text_records_rows (id, title, content, source, word_count, created_at, updated_at)
-        VALUES (:id, :title, :content, :source, 0, DATEADD(hour, 9, SYSUTCDATETIME()), DATEADD(hour, 9, SYSUTCDATETIME()))
-    """)
-    db.session.execute(query, {"id": record_id, "title": title, "content": content, "source": source})
-    db.session.commit()
-    return jsonify({"message": "텍스트 업로드 완료"})
+        if not title or not content:
+            return jsonify({"error": "제목과 본문 내용을 입력해주세요."}), 400
+
+        requested_id = (data.get('id') or '').strip()
+        base_id = requested_id or title.split(' ')[0][:8] or f"TXT{uuid.uuid4().hex[:5]}"
+        record_id = base_id
+
+        # ID 충돌 시 접미사를 붙여 유일한 ID 생성
+        suffix = 1
+        while db.session.execute(
+            text("SELECT 1 FROM text_records_rows WHERE id = :id"),
+            {"id": record_id}
+        ).fetchone():
+            suffix += 1
+            record_id = f"{base_id}_{suffix}"
+
+        query = text("""
+            INSERT INTO text_records_rows (id, title, content, source, word_count, created_at, updated_at)
+            VALUES (:id, :title, :content, :source, 0, DATEADD(hour, 9, SYSUTCDATETIME()), DATEADD(hour, 9, SYSUTCDATETIME()))
+        """)
+        db.session.execute(query, {"id": record_id, "title": title, "content": content, "source": source})
+        db.session.commit()
+        return jsonify({"message": f"텍스트 업로드 완료 ({record_id})"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+# ✅ 본문 대량 업로드
+@app.route('/upload_texts_bulk', methods=['POST'])
+def upload_texts_bulk():
+    try:
+        data = request.get_json() or {}
+        texts = data.get('texts', [])
+
+        if not isinstance(texts, list) or not texts:
+            return jsonify({"error": "본문 데이터가 없습니다."}), 400
+
+        normalized = []
+        for item in texts:
+            if not isinstance(item, dict):
+                continue
+            row_id = (item.get('id') or '').strip()
+            row_title = (item.get('title') or '').strip()
+            row_source = (item.get('source') or '').strip()
+            row_content = (item.get('content') or '').strip()
+            if not row_title or not row_content:
+                continue
+            normalized.append({
+                "id": row_id,
+                "title": row_title,
+                "source": row_source,
+                "content": row_content,
+            })
+
+        if not normalized:
+            return jsonify({"error": "유효한 본문 데이터가 없습니다."}), 400
+
+        inserted = 0
+        conflict_ids = []
+        for row in normalized:
+            base_id = row["id"] or row["title"].split(' ')[0][:8] or f"TXT{uuid.uuid4().hex[:5]}"
+            record_id = base_id
+
+            if row["id"]:
+                exists = db.session.execute(
+                    text("SELECT 1 FROM text_records_rows WHERE id = :id"),
+                    {"id": record_id}
+                ).fetchone()
+                if exists:
+                    conflict_ids.append(record_id)
+                    continue
+            else:
+                suffix = 1
+                while db.session.execute(
+                    text("SELECT 1 FROM text_records_rows WHERE id = :id"),
+                    {"id": record_id}
+                ).fetchone():
+                    suffix += 1
+                    record_id = f"{base_id}_{suffix}"
+
+            db.session.execute(text("""
+                INSERT INTO text_records_rows (id, title, content, source, word_count, created_at, updated_at)
+                VALUES (:id, :title, :content, :source, 0, DATEADD(hour, 9, SYSUTCDATETIME()), DATEADD(hour, 9, SYSUTCDATETIME()))
+            """), {
+                "id": record_id,
+                "title": row["title"],
+                "content": row["content"],
+                "source": row["source"],
+            })
+            inserted += 1
+
+        db.session.commit()
+
+        if conflict_ids:
+            return jsonify({
+                "message": f"본문 대량 업로드 완료 (저장 {inserted}건, 충돌 {len(conflict_ids)}건)",
+                "conflict_ids": conflict_ids,
+            })
+
+        return jsonify({"message": f"본문 대량 업로드 완료 ({inserted}건)"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
 
 
 
@@ -912,26 +1002,118 @@ def upload_text():
 def upload_words():
     try:
         data = request.get_json()
-        text_id = data.get('text_id')
-        words = data.get('words', [])
+        text_id = (data.get('text_id') or '').strip()
+        raw_words = data.get('words', [])
 
-        if not text_id or not words:
-            return jsonify({"error": "필수 데이터 누락"}), 400
+        # 프론트 입력 변형에 대비해 문자열 정규화
+        words = []
+        for w in raw_words:
+            if not isinstance(w, dict):
+                continue
+            words.append({
+                "text_id": str(w.get("text_id", "")).strip(),
+                "word": str(w.get("word", "")).strip(),
+                "meaning": str(w.get("meaning", "")).strip(),
+                "example": str(w.get("example", "")).strip(),
+                "exam_korean": str(w.get("exam_korean", "")).strip(),
+                "is_learned": w.get("is_learned", 0),
+            })
 
-        # 텍스트 제목
-        title_query = text("SELECT title FROM text_records_rows WHERE id = :id")
-        result = db.session.execute(title_query, {"id": text_id}).fetchone()
-        text_title = result.title if result else "(제목 없음)"
+        if not words:
+            return jsonify({"error": "단어 데이터가 없습니다."}), 400
+
+        # 방어 로직: word 칼럼이 숫자(ID), meaning 칼럼이 영단어로 밀린 경우 자동 보정
+        numeric_word_rows = [
+            w for w in words
+            if w.get("word", "").isdigit() and w.get("meaning")
+        ]
+        if numeric_word_rows:
+            looks_shifted = all(
+                any(ch.isalpha() for ch in (w.get("meaning") or ""))
+                for w in numeric_word_rows
+            )
+            if looks_shifted:
+                shifted_words = []
+                for w in words:
+                    if w.get("word", "").isdigit():
+                        shifted_words.append({
+                            "text_id": w.get("word", "").strip(),
+                            "word": w.get("meaning", "").strip(),
+                            "meaning": w.get("example", "").strip(),
+                            "example": "",
+                            "exam_korean": w.get("exam_korean", ""),
+                            "is_learned": w.get("is_learned", 0),
+                        })
+                    else:
+                        shifted_words.append(w)
+                words = shifted_words
+
+        # 최소 유효성: 단어/뜻이 비어있는 행 제거
+        words = [w for w in words if w.get("word") and w.get("meaning")]
+        if not words:
+            return jsonify({"error": "유효한 단어/뜻 데이터가 없습니다."}), 400
+
+        selected_fixed_text = text_id and text_id not in {'AUTO_BULK', '__AUTO_BULK__', 'BULK'}
+        for w in words:
+            row_text_id = (w.get("text_id") or "").strip()
+            if selected_fixed_text:
+                w["target_text_id"] = text_id
+            else:
+                w["target_text_id"] = row_text_id or 'BULK'
+
+        target_ids = sorted({w["target_text_id"] for w in words})
+
+        # 대상 본문 메타 조회
+        text_meta = {}
+        if target_ids:
+            id_params = {f"tid{i}": tid for i, tid in enumerate(target_ids)}
+            placeholders = ', '.join([f":tid{i}" for i in range(len(target_ids))])
+            title_rows = db.session.execute(
+                text(f"SELECT id, title FROM text_records_rows WHERE id IN ({placeholders})"),
+                id_params
+            ).fetchall()
+            text_meta = {r.id: (r.title or "(제목 없음)") for r in title_rows}
+
+        # 없는 본문은 자동 생성
+        now = now_kst()
+        for tid in target_ids:
+            if tid in text_meta:
+                continue
+
+            if tid == 'BULK':
+                default_title = '엑셀 대량등록'
+                default_content = '엑셀/붙여넣기 대량 단어 등록용 본문'
+                default_source = 'BULK_UPLOAD'
+            else:
+                default_title = f'{tid} 자동등록'
+                default_content = f'{tid} 본문 ID로 대량 단어 등록'
+                default_source = 'MULTI_BULK_UPLOAD'
+
+            db.session.execute(text("""
+                INSERT INTO text_records_rows
+                    (id, title, content, source, word_count, created_at, updated_at)
+                VALUES
+                    (:id, :title, :content, :source, 0, :now, :now)
+            """), {
+                "id": tid,
+                "title": default_title,
+                "content": default_content,
+                "source": default_source,
+                "now": now,
+            })
+            text_meta[tid] = default_title
 
         # ✅ 현재 가장 큰 id 값 가져오기
         last_id_query = text("SELECT MAX(CAST(id AS INT)) AS max_id FROM words_rows")
         result = db.session.execute(last_id_query).fetchone()
         current_max_id = result.max_id or 0  # 없으면 0부터 시작
 
-        now = now_kst()
+        inserted_by_text = {}
 
         for w in words:
             current_max_id += 1  # +1 증가
+            target_text_id = w.get("target_text_id", 'BULK')
+            text_title = text_meta.get(target_text_id, "(제목 없음)")
             insert_query = text("""
                 INSERT INTO words_rows
                     (id, word, meaning, is_learned, text_id, text_title,
@@ -945,15 +1127,17 @@ def upload_words():
                 "word": w["word"],
                 "meaning": w["meaning"],
                 "is_learned": w.get("is_learned", 0),
-                "text_id": text_id,
+                "text_id": target_text_id,
                 "text_title": text_title,
                 "now": now,
                 "example": w.get("example", ""),
                 "exam_korean": w.get("exam_korean", "")
             })
+            inserted_by_text[target_text_id] = inserted_by_text.get(target_text_id, 0) + 1
 
         db.session.commit()
-        return jsonify({"message": "단어 업로드 완료"})
+        summary = ', '.join([f"{tid}:{cnt}개" for tid, cnt in sorted(inserted_by_text.items())])
+        return jsonify({"message": f"단어 업로드 완료 ({summary})"})
 
     except Exception as e:
         db.session.rollback()
