@@ -198,20 +198,31 @@
           <button onclick="closeUploadModal()" class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400">취소</button>
           <button onclick="submitTextUpload()" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">저장</button>
         </div>
+
+        <div class="border-t mt-6 pt-4">
+          <label class="block text-sm font-semibold text-gray-700 mb-1">본문 대량등록 (탭 구분, 한 줄당 하나)</label>
+          <p class="text-xs text-gray-500 mb-1">형식: <b>본문ID(선택) [탭] 제목 [탭] 출처(선택) [탭] 본문내용</b></p>
+          <textarea id="bulkTextInput" rows="6" class="w-full border rounded-lg p-3 mb-3"
+            placeholder="예시:&#10;7101&#9;7101 DAY1&#9;학원교재&#9;This is the first passage.&#10;7102&#9;7102 DAY1&#9;학원교재&#9;This is the second passage."></textarea>
+          <div class="flex justify-end">
+            <button onclick="submitBulkTexts()" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">본문 대량 저장</button>
+          </div>
+        </div>
       </div>
 
       <!-- ✅ 단어 업로드 탭 -->
 <div id="wordUploadTab" class="hidden">
   <label class="block text-sm font-semibold text-gray-700 mb-1">본문 선택</label>
   <select id="wordTextSelect" class="w-full border rounded-lg p-2 mb-4">
+    <option value="AUTO_BULK" selected>본문 선택 없이 대량등록 (엑셀 복붙)</option>
     <option value="">본문을 선택하세요</option>
   </select>
 
   <label class="block text-sm font-semibold text-gray-700 mb-1">단어 목록 (한 줄당 하나씩, 탭 구분)</label>
-  <p class="text-xs text-gray-500 mb-1">형식: <b>단어 [탭] 뜻 [탭] 예문(선택)</b></p>
+  <p class="text-xs text-gray-500 mb-1">형식: <b>단어 [탭] 뜻 [탭] 예문(선택)</b> 또는 <b>본문ID [탭] 단어 [탭] 뜻 [탭] 예문(선택)</b></p>
   <textarea id="bulkWordInput" rows="8" class="w-full border rounded-lg p-3 mb-3"
     oninput="previewBulkWords()"
-    placeholder="예시:&#10;glyph&#9;상형문자&#9;The glyphs on the wall tell a story.&#10;haphazard&#9;계획성이 없는&#9;The work was done in a haphazard manner.&#10;hereditary&#9;유전의"></textarea>
+    placeholder="예시:&#10;glyph&#9;상형문자&#9;The glyphs on the wall tell a story.&#10;haphazard&#9;계획성이 없는&#9;The work was done in a haphazard manner.&#10;7101&#9;abrupt&#9;갑작스러운"></textarea>
 
   <!-- 미리보기 -->
   <div id="bulkPreviewWrap" class="hidden mb-4">
@@ -288,7 +299,7 @@
     // ✅ 본문 목록 로드 (base.html용)
     function loadTextOptionsForBaseModal() {
       const select = document.getElementById('wordTextSelect');
-      select.innerHTML = '<option value="">본문을 선택하세요</option>';
+      select.innerHTML = '<option value="AUTO_BULK" selected>본문 선택 없이 대량등록 (엑셀 복붙)</option><option value="">본문을 선택하세요</option>';
       
       fetch('/get_text_titles')
         .then(res => res.json())
@@ -336,21 +347,116 @@
       .catch(() => alert('❌ 업로드 중 오류 발생'));
     }
 
-    // 단어 목록 파싱 헬퍼
-    function parseBulkWordLines(rawList) {
-      return rawList.split('\n').map(line => {
-        const parts = line.trim().split(/\t/);
-        if (parts.length >= 2) {
+    // 본문 대량등록 파싱
+    function parseBulkTextLines(rawList) {
+      const lines = rawList.split('\n').map(line => line.trim()).filter(Boolean);
+      return lines.map(line => {
+        const parts = line.split('\t').map(p => p.trim());
+        if (parts.length < 2) return null;
+
+        const hasId = /^\d+$/.test(parts[0] || '');
+        if (hasId && parts.length >= 4) {
           return {
-            word: parts[0].trim(),
-            meaning: parts[1].trim(),
-            example: parts[2] ? parts[2].trim() : ''
+            id: parts[0],
+            title: parts[1] || '',
+            source: parts[2] || '',
+            content: parts.slice(3).join(' ') || ''
           };
         }
-        // 탭 없을 경우 공백으로 시도 (예문 없음)
-        const [word, ...rest] = line.trim().split(/\s+/);
-        return word && rest.length ? { word, meaning: rest.join(' '), example: '' } : null;
-      }).filter(Boolean);
+
+        return {
+          id: '',
+          title: parts[0] || '',
+          source: parts[1] || '',
+          content: parts.slice(2).join(' ') || ''
+        };
+      }).filter(t => t && t.title && t.content);
+    }
+
+    function submitBulkTexts() {
+      const rawList = document.getElementById('bulkTextInput').value.trim();
+      if (!rawList) return alert('본문 대량등록 목록을 입력해주세요.');
+
+      const texts = parseBulkTextLines(rawList);
+      if (!texts.length) return alert('올바른 형식으로 입력해주세요.');
+
+      fetch('/upload_texts_bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texts })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) return alert(`❌ ${data.error}`);
+        const conflictHint = data.conflict_ids && data.conflict_ids.length
+          ? `\n중복 ID: ${data.conflict_ids.join(', ')}`
+          : '';
+        alert(`✅ ${data.message}${conflictHint}`);
+        closeUploadModal();
+        location.reload();
+      })
+      .catch(() => alert('❌ 본문 대량 업로드 중 오류 발생'));
+    }
+
+    // 단어 목록 파싱 헬퍼
+    // 지원 형식:
+    // 1) 단어[TAB]뜻[TAB]예문(선택)
+    // 2) 본문ID[TAB]단어[TAB]뜻[TAB]예문(선택)
+    // 3) 본문ID 단어 뜻 (공백 구분)
+    function parseBulkWordLines(rawList, selectedTextId = '') {
+      const lines = rawList
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+
+      const words = lines.map(line => {
+        const hasTab = line.includes('\t');
+        const parts = hasTab
+          ? line.split('\t').map(p => p.trim())
+          : line.split(/\s+/).map(p => p.trim());
+
+        if (!parts.length) return null;
+
+        const c1 = (parts[0] || '').replace(/\s+/g, '').toLowerCase();
+        const c2 = (parts[1] || '').replace(/\s+/g, '').toLowerCase();
+        const c3 = (parts[2] || '').replace(/\s+/g, '').toLowerCase();
+        const isHeader = (
+          (c1.includes('본문id') || c1 === 'textid' || c1 === 'text_id') &&
+          (c2.includes('단어') || c2 === 'word') &&
+          (c3.includes('뜻') || c3 === 'meaning')
+        );
+        if (isHeader) return null;
+
+        if (parts.length < 2) return null;
+
+        const hasNumericLead = /^\d+$/.test(parts[0] || '');
+        if (hasNumericLead && parts.length >= 3) {
+          return {
+            text_id: parts[0] || '',
+            word: parts[1] || '',
+            meaning: hasTab ? (parts[2] || '') : (parts.slice(2).join(' ') || ''),
+            example: hasTab ? (parts.slice(3).join(' ') || '') : ''
+          };
+        }
+
+        return {
+          text_id: '',
+          word: parts[0] || '',
+          meaning: hasTab ? (parts[1] || '') : (parts.slice(1).join(' ') || ''),
+          example: hasTab ? (parts.slice(2).join(' ') || '') : ''
+        };
+      }).filter(w => w && w.word && w.meaning);
+
+      const detectedTextIds = [...new Set(words.map(w => (w.text_id || '').trim()).filter(Boolean))];
+      if (detectedTextIds.length && selectedTextId && selectedTextId !== 'AUTO_BULK' && detectedTextIds.some(id => id !== selectedTextId)) {
+        return {
+          words,
+          detectedTextIds,
+          error: `선택한 본문(${selectedTextId})과 입력된 본문 ID(${detectedTextIds.join(', ')})가 다릅니다.`
+        };
+      }
+
+      return { words, detectedTextIds };
     }
 
     // ✅ 미리보기 렌더링
@@ -362,11 +468,17 @@
 
       if (!rawList) { wrap.classList.add('hidden'); return; }
 
-      const words = parseBulkWordLines(rawList);
+      const selectedTextId = document.getElementById('wordTextSelect').value;
+      const parsed = parseBulkWordLines(rawList, selectedTextId);
+      const words = parsed.words;
       if (!words.length) { wrap.classList.add('hidden'); return; }
 
       wrap.classList.remove('hidden');
-      countEl.textContent = `(${words.length}개)`;
+      const ids = parsed.detectedTextIds || [];
+      const idHint = ids.length
+        ? `, 본문ID: ${ids.slice(0, 3).join(', ')}${ids.length > 3 ? '...' : ''}`
+        : '';
+      countEl.textContent = `(${words.length}개${idHint})`;
       body.innerHTML = words.map((w, i) => `
         <tr class="${i % 2 === 0 ? '' : 'bg-gray-50'}">
           <td class="border px-2 py-1 text-gray-500">${i + 1}</td>
@@ -378,19 +490,25 @@
 
     // ✅ 단어 일괄 업로드
     function submitBulkWords() {
-      const textId = document.getElementById('wordTextSelect').value;
+      const selectedTextId = document.getElementById('wordTextSelect').value;
       const rawList = document.getElementById('bulkWordInput').value.trim();
 
-      if (!textId) return alert('본문을 선택해주세요.');
       if (!rawList) return alert('단어 목록을 입력해주세요.');
 
-      const words = parseBulkWordLines(rawList);
+      const parsed = parseBulkWordLines(rawList, selectedTextId);
+      if (parsed.error) return alert(parsed.error);
+
+      const words = parsed.words;
       if (words.length === 0) return alert('올바른 형식으로 단어를 입력해주세요.');
+
+      const finalTextId = (selectedTextId && selectedTextId !== 'AUTO_BULK')
+        ? selectedTextId
+        : 'AUTO_BULK';
 
       fetch('/upload_words', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text_id: textId, words })
+        body: JSON.stringify({ text_id: finalTextId, words })
       })
       .then(res => res.json())
       .then(() => {

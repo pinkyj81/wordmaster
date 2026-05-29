@@ -133,6 +133,16 @@
           <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">저장</button>
         </div>
       </form>
+
+      <div class="border-t mt-6 pt-4">
+        <label class="block font-medium text-gray-700 mb-1">본문 대량등록 (탭 구분, 한 줄당 하나)</label>
+        <p class="text-xs text-gray-500 mb-1">형식: <b>본문ID(선택) [탭] 제목 [탭] 출처(선택) [탭] 본문내용</b></p>
+        <textarea id="bulkTextInput" class="w-full border rounded-md px-3 py-2 h-36"
+                  placeholder="예시:&#10;7101&#9;7101 DAY1&#9;학원교재&#9;This is the first passage.&#10;7102&#9;7102 DAY1&#9;학원교재&#9;This is the second passage."></textarea>
+        <div class="text-right mt-3">
+          <button type="button" onclick="submitBulkTexts()" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">본문 대량 저장</button>
+        </div>
+      </div>
     </div>
 
     <!-- 단어 업로드 폼 -->
@@ -141,6 +151,7 @@
         <div class="mb-3">
           <label class="block font-medium text-gray-700 mb-1">본문 선택</label>
           <select id="textSelect" class="w-full border rounded-md px-3 py-2">
+            <option value="AUTO_BULK" selected>본문 선택 없이 대량등록 (엑셀 복붙)</option>
             <option value="">본문을 선택하세요</option>
             {% for t in texts %}
               <option value="{{ t.id }}">{{ t.title }}</option>
@@ -149,9 +160,9 @@
         </div>
         <div class="mb-3">
           <label class="block font-medium text-gray-700 mb-1">단어 목록 (한 줄당 하나씩, 탭 구분)</label>
-          <p class="text-xs text-gray-500 mb-1">형식: <b>단어 [탭] 뜻 [탭] 예문(선택)</b></p>
+          <p class="text-xs text-gray-500 mb-1">형식: <b>단어 [탭] 뜻 [탭] 예문(선택)</b> 또는 <b>본문ID [탭] 단어 [탭] 뜻 [탭] 예문(선택)</b></p>
           <textarea id="wordsInput" class="w-full border rounded-md px-3 py-2 h-40"
-                    placeholder="예시:&#10;archaeologist&#9;고고학자&#9;She is an archaeologist.&#10;codices&#9;(codex의 복수) 고문서&#10;confederation&#9;조합"></textarea>
+                    placeholder="예시:&#10;archaeologist&#9;고고학자&#9;She is an archaeologist.&#10;codices&#9;(codex의 복수) 고문서&#10;7101&#9;abrupt&#9;갑작스러운"></textarea>
         </div>
 
         <div class="mt-3">
@@ -344,16 +355,77 @@ function switchTab(tab) {
 /* 미리보기 */
 const wordsInput = document.getElementById('wordsInput');
 const previewBody = document.getElementById('previewTable');
+
+// 단어 목록 파싱 헬퍼
+// 지원 형식:
+// 1) 단어[TAB]뜻[TAB]예문(선택)
+// 2) 본문ID[TAB]단어[TAB]뜻[TAB]예문(선택)
+// 3) 본문ID 단어 뜻 (공백 구분)
+function parseWordUploadLines(rawText, selectedTextId = '') {
+  const lines = rawText
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  const words = lines.map(line => {
+    const hasTab = line.includes('\t');
+    const parts = hasTab
+      ? line.split('\t').map(p => p.trim())
+      : line.split(/\s+/).map(p => p.trim());
+
+    if (!parts.length) return null;
+
+    const c1 = (parts[0] || '').replace(/\s+/g, '').toLowerCase();
+    const c2 = (parts[1] || '').replace(/\s+/g, '').toLowerCase();
+    const c3 = (parts[2] || '').replace(/\s+/g, '').toLowerCase();
+    const isHeader = (
+      (c1.includes('본문id') || c1 === 'textid' || c1 === 'text_id') &&
+      (c2.includes('단어') || c2 === 'word') &&
+      (c3.includes('뜻') || c3 === 'meaning')
+    );
+    if (isHeader) return null;
+
+    if (parts.length < 2) return null;
+
+    const hasNumericLead = /^\d+$/.test(parts[0] || '');
+    if (hasNumericLead && parts.length >= 3) {
+      return {
+        text_id: parts[0] || '',
+        word: parts[1] || '',
+        meaning: hasTab ? (parts[2] || '') : (parts.slice(2).join(' ') || ''),
+        example: hasTab ? (parts.slice(3).join(' ') || '') : ''
+      };
+    }
+
+    return {
+      text_id: '',
+      word: parts[0] || '',
+      meaning: hasTab ? (parts[1] || '') : (parts.slice(1).join(' ') || ''),
+      example: hasTab ? (parts.slice(2).join(' ') || '') : ''
+    };
+  }).filter(w => w && w.word && w.meaning);
+
+  const detectedTextIds = [...new Set(words.map(w => (w.text_id || '').trim()).filter(Boolean))];
+  if (detectedTextIds.length && selectedTextId && selectedTextId !== 'AUTO_BULK' && detectedTextIds.some(id => id !== selectedTextId)) {
+    return {
+      words,
+      detectedTextIds,
+      error: `선택한 본문(${selectedTextId})과 입력된 본문 ID(${detectedTextIds.join(', ')})가 다릅니다.`
+    };
+  }
+
+  return { words, detectedTextIds };
+}
+
 if (wordsInput) {
   wordsInput.addEventListener('input', () => {
     previewBody.innerHTML = '';
-    const lines = wordsInput.value.trim().split('\n').filter(l => l.trim());
-    lines.forEach((line, i) => {
-      const parts = line.split('\t');
-      const word = parts[0] || '';
-      const meaning = parts[1] || '';
-      const example = parts[2] || '';
-      const row = `<tr><td class="border px-2 text-center">${i + 1}</td><td class="border px-2">${word}</td><td class="border px-2">${meaning}</td><td class="border px-2 text-gray-500 italic">${example}</td></tr>`;
+    const selectedTextId = document.getElementById('textSelect')?.value || '';
+    const parsed = parseWordUploadLines(wordsInput.value.trim(), selectedTextId);
+    const words = parsed.words;
+
+    words.forEach((w, i) => {
+      const row = `<tr><td class="border px-2 text-center">${i + 1}</td><td class="border px-2">${w.word}</td><td class="border px-2">${w.meaning}</td><td class="border px-2 text-gray-500 italic">${w.example || ''}</td></tr>`;
       previewBody.insertAdjacentHTML('beforeend', row);
     });
   });
@@ -377,27 +449,73 @@ document.getElementById('uploadTextForm').addEventListener('submit', async (e) =
   location.reload();
 });
 
+function parseBulkTextLines(rawText) {
+  const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
+  return lines.map(line => {
+    const parts = line.split('\t').map(p => p.trim());
+    if (parts.length < 2) return null;
+
+    const hasId = /^\d+$/.test(parts[0] || '');
+    if (hasId && parts.length >= 4) {
+      return {
+        id: parts[0],
+        title: parts[1] || '',
+        source: parts[2] || '',
+        content: parts.slice(3).join(' ') || ''
+      };
+    }
+
+    return {
+      id: '',
+      title: parts[0] || '',
+      source: parts[1] || '',
+      content: parts.slice(2).join(' ') || ''
+    };
+  }).filter(t => t && t.title && t.content);
+}
+
+async function submitBulkTexts() {
+  const rawText = document.getElementById('bulkTextInput').value.trim();
+  if (!rawText) return alert('본문 대량등록 목록을 입력해주세요.');
+
+  const texts = parseBulkTextLines(rawText);
+  if (!texts.length) return alert('올바른 형식으로 입력해주세요.');
+
+  const res = await fetch('/upload_texts_bulk', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ texts })
+  });
+  const data = await res.json();
+  if (data.error) return alert(data.error);
+
+  const conflictHint = data.conflict_ids && data.conflict_ids.length
+    ? `\n중복 ID: ${data.conflict_ids.join(', ')}`
+    : '';
+  alert(`${data.message}${conflictHint}`);
+  closeUploadModal();
+  location.reload();
+}
+
 /* 단어 업로드 */
 document.getElementById('uploadWordsForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const text_id = document.getElementById('textSelect').value;
+  const selectedTextId = document.getElementById('textSelect').value;
   const rawText = document.getElementById('wordsInput').value.trim();
-  if (!text_id || !rawText) return alert("텍스트와 단어를 모두 입력해주세요.");
+  if (!rawText) return alert("단어를 입력해주세요.");
 
-  const lines = rawText.split('\n').filter(l => l.trim());
-  const words = lines.map(line => {
-    const parts = line.split('\t');
-    return {
-      word: (parts[0] || '').trim(),
-      meaning: (parts[1] || '').trim(),
-      example: (parts[2] || '').trim()
-    };
-  }).filter(w => w.word);
+  const parsed = parseWordUploadLines(rawText, selectedTextId);
+  if (parsed.error) return alert(parsed.error);
+
+  const words = parsed.words;
+  const finalTextId = (selectedTextId && selectedTextId !== 'AUTO_BULK')
+    ? selectedTextId
+    : 'AUTO_BULK';
 
   const res = await fetch('/upload_words', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ text_id, words })
+    body: JSON.stringify({ text_id: finalTextId, words })
   });
   const data = await res.json();
   alert(data.message || data.error);

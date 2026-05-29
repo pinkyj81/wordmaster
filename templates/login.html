@@ -140,7 +140,7 @@
         </div>
         {% endif %}
 
-        <form method="POST" action="{{ url_for('login') }}">
+        <form id="loginForm" method="POST" action="{{ url_for('login') }}">
             <div class="form-group">
                 <label for="user_id">사용자 선택</label>
                 <select id="user_id" name="user_id" required>
@@ -155,8 +155,20 @@
         </form>
 
         <div class="warning-note">
-            ⚠️ 안내: 사용자를 선택하면 자동으로 로그인됩니다. 저음 사용하시는 경우 계정이 자동으로 생성됩니다.
+                        ⚠️ 안내: 사용자를 선택하면 자동으로 로그인됩니다. 처음 사용하시는 경우 계정이 자동으로 생성됩니다.
         </div>
     </div>
+
+        <script>
+            (function () {
+                const form = document.getElementById('loginForm');
+                const select = document.getElementById('user_id');
+                if (!form || !select) return;
+
+                select.addEventListener('change', () => {
+                    if (select.value) form.submit();
+                });
+            })();
+        </script>
 </body>
 </html>
