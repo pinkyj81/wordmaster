@@ -641,7 +641,7 @@ def learning_log():
             """)
             summary_rows = db.session.execute(summary_query, {"user_id": user_id}).fetchall()
 
-    summary = [{"test_name": user_map.get(r.user_id, f'User {r.user_id}'), "test_count": r.test_count} for r in summary_rows]
+    summary = [{"test_name": user_map.get(r.user_id, str(r.user_id or 'Unknown')), "test_count": r.test_count} for r in summary_rows]
 
     # distinct test names for datalist/autocomplete
     if show_all:
@@ -654,7 +654,7 @@ def learning_log():
 
     user_options = []
     for row in un_rows:
-        display_name = user_map.get(row.user_id, f'User {row.user_id}')
+        display_name = user_map.get(row.user_id, str(row.user_id or 'Unknown'))
         if display_name not in user_options:
             user_options.append(display_name)
 
@@ -673,11 +673,56 @@ def learning_log():
             "duration": row.duration,
             "completed_at": row.completed_at,
             "test_words": wrong_list,
-            "user_name": user_map.get(row.user_id, f'User {row.user_id}')
+            "user_name": user_map.get(row.user_id, str(row.user_id or 'Unknown'))
         })
 
     if selected_user:
         formatted_logs = [log for log in formatted_logs if log.get("user_name") == selected_user]
+
+    today_kst = datetime.now(KST).date()
+    heatmap_start = today_kst - timedelta(days=364)
+    user_daily_map = {}
+
+    for log in formatted_logs:
+        completed_at = log.get("completed_at")
+        if not completed_at:
+            continue
+
+        completed_date = completed_at.date() if hasattr(completed_at, "date") else None
+        if not completed_date or completed_date < heatmap_start or completed_date > today_kst:
+            continue
+
+        user_name = log.get("user_name") or "Unknown"
+        date_key = completed_date.strftime("%Y-%m-%d")
+
+        if user_name not in user_daily_map:
+            user_daily_map[user_name] = {}
+        if date_key not in user_daily_map[user_name]:
+            user_daily_map[user_name][date_key] = {"count": 0, "score_sum": 0.0}
+
+        user_daily_map[user_name][date_key]["count"] += 1
+        user_daily_map[user_name][date_key]["score_sum"] += float(log.get("score") or 0)
+
+    heatmap_users = []
+    for name, date_map in user_daily_map.items():
+        normalized_dates = {}
+        total_tests = 0
+        for date_key, item in date_map.items():
+            count = int(item.get("count", 0))
+            if count <= 0:
+                continue
+            avg_score = round(float(item.get("score_sum", 0.0)) / count, 1)
+            normalized_dates[date_key] = {"count": count, "avg_score": avg_score}
+            total_tests += count
+
+        heatmap_users.append({
+            "user_name": name,
+            "total_tests": total_tests,
+            "active_days": len(normalized_dates),
+            "dates": normalized_dates,
+        })
+
+    heatmap_users.sort(key=lambda x: x.get("total_tests", 0), reverse=True)
 
     return render_template(
         'learning_log.html',
@@ -689,6 +734,9 @@ def learning_log():
         view_all=view_all,
         user_options=user_options,
         selected_user=selected_user,
+        heatmap_users=heatmap_users,
+        heatmap_start=heatmap_start.strftime("%Y-%m-%d"),
+        heatmap_end=today_kst.strftime("%Y-%m-%d"),
     )
 
 

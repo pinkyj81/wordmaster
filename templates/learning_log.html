@@ -1,27 +1,112 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="p-8">
+  <style>
+    .heatmap-user-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 14px;
+      background: #fbfdff;
+    }
+
+    .heatmap-months {
+      display: grid;
+      grid-template-columns: repeat(53, 12px);
+      gap: 3px;
+      margin-left: 26px;
+      margin-bottom: 6px;
+      font-size: 11px;
+      color: #6b7280;
+    }
+
+    .heatmap-grid-wrap {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+
+    .heatmap-weekdays {
+      width: 20px;
+      font-size: 11px;
+      color: #6b7280;
+      line-height: 15px;
+      padding-top: 1px;
+    }
+
+    .heatmap-weekdays div {
+      height: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    .heatmap-grid {
+      display: grid;
+      grid-template-columns: repeat(53, 12px);
+      grid-template-rows: repeat(7, 12px);
+      grid-auto-flow: column;
+      gap: 3px;
+    }
+
+    .heatmap-cell {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      border: 1px solid rgba(27, 31, 35, 0.08);
+      background: #ebedf0;
+      cursor: pointer;
+    }
+
+    .heatmap-cell.l1 { background: #c6f6d5; }
+    .heatmap-cell.l2 { background: #86efac; }
+    .heatmap-cell.l3 { background: #22c55e; }
+    .heatmap-cell.l4 { background: #166534; }
+
+    .heatmap-legend {
+      margin-top: 8px;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: #6b7280;
+    }
+
+    .heatmap-legend .swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      border: 1px solid rgba(27, 31, 35, 0.08);
+      background: #ebedf0;
+    }
+
+    .heatmap-legend .swatch.l1 { background: #c6f6d5; }
+    .heatmap-legend .swatch.l2 { background: #86efac; }
+    .heatmap-legend .swatch.l3 { background: #22c55e; }
+    .heatmap-legend .swatch.l4 { background: #166534; }
+  </style>
+
   <h2 class="text-2xl font-bold mb-6 text-gray-800">학습 기록 대시보드</h2>
 
-  <!-- ✅ 테스트 횟수 요약 그래프 -->
   <div class="bg-white p-6 rounded-xl shadow mb-8">
-    <h3 class="text-lg font-semibold mb-4 text-gray-700">사용자별 테스트 횟수</h3>
-    <canvas id="testCountChart" height="120"></canvas>
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-lg font-semibold text-gray-700">사용자별 테스트 활동 히트맵</h3>
+      <span class="text-xs text-gray-500">최근 365일 기준, 날짜별 테스트 횟수/평균점수</span>
+    </div>
+    <div id="userHeatmapContainer" class="space-y-4"></div>
   </div>
 
-  <!-- ✅ 학습 기록 테이블 -->
   <div class="bg-white p-6 rounded-xl shadow">
     <div class="flex justify-between items-center mb-4">
       <h3 class="text-lg font-semibold text-gray-700">상세 기록</h3>
       <div class="flex items-center gap-2">
         <label class="text-sm text-gray-600">전체 사용자 보기:</label>
-        <input type="checkbox" id="viewAllToggle" {% if view_all %}checked{% endif %} 
-               onchange="toggleViewAll(this.checked)" 
+        <input type="checkbox" id="viewAllToggle" {% if view_all %}checked{% endif %}
+               onchange="toggleViewAll(this.checked)"
                class="w-5 h-5 text-blue-600 cursor-pointer">
       </div>
     </div>
 
-    <!-- 검색 (텍스트 제목으로) -->
     <form method="get" class="mb-4 flex items-center gap-2" id="searchForm">
       <input list="testNames" name="q" placeholder="텍스트 제목으로 검색..." value="{{ q }}" class="border rounded px-3 py-2 w-64" />
       <datalist id="testNames">
@@ -69,15 +154,8 @@
             <td class="p-3 border">{{ log.test_name }}</td>
             <td class="p-3 border text-center">{{ log.total_questions }}</td>
             <td class="p-3 border text-center">{{ log.correct_answers }}</td>
-
-            <!-- ✅ 점수 정수 + % 표시 -->
-            <td class="p-3 border text-blue-600 font-semibold text-center">
-              {{ "%.0f"|format(log.score) }}%
-            </td>
-
+            <td class="p-3 border text-blue-600 font-semibold text-center">{{ "%.0f"|format(log.score) }}%</td>
             <td class="p-3 border text-center">{{ log.duration }}초</td>
-
-            <!-- ✅ 틀린 단어 보기 버튼 -->
             <td class="p-3 border text-center">
               <button
                 onclick="showWrongWords({{ log.test_words | safe }})"
@@ -95,7 +173,6 @@
   </div>
 </div>
 
-<!-- ✅ 틀린 단어 모달 -->
 <div id="wrongWordModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
   <div class="bg-white rounded-xl p-6 w-[400px] shadow-lg max-h-[70vh] overflow-y-auto">
     <h3 class="text-lg font-semibold text-gray-800 mb-3">틀린 단어 목록</h3>
@@ -104,45 +181,104 @@
   </div>
 </div>
 
-<!-- ✅ Chart.js 그래프 -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-const summaryData = {{ summary | tojson }};
-const ctx = document.getElementById('testCountChart').getContext('2d');
+const heatmapUsers = {{ heatmap_users | tojson }};
+const heatmapStart = new Date("{{ heatmap_start }}T00:00:00");
+const heatmapEnd = new Date("{{ heatmap_end }}T00:00:00");
 
-const labels = summaryData.map(s => s.test_name);
-const counts = summaryData.map(s => s.test_count);
+function getMonthLabel(dt) {
+  return dt.toLocaleString('en-US', { month: 'short' });
+}
 
-new Chart(ctx, {
-  type: 'bar',
-  data: {
-    labels: labels,
-    datasets: [{
-      label: '테스트 횟수',
-      data: counts,
-      backgroundColor: 'rgba(59, 130, 246, 0.6)',
-      borderColor: 'rgba(59, 130, 246, 1)',
-      borderWidth: 1,
-      borderRadius: 5,
-    }]
-  },
-  options: {
-    responsive: true,
-    scales: {
-      y: {
-        beginAtZero: true,
-        ticks: { stepSize: 1 }
-      }
-    },
-    plugins: {
-      legend: { display: false },
-      tooltip: { backgroundColor: '#2563EB', titleColor: '#fff', bodyColor: '#fff' }
-    }
+function toDateKey(dt) {
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getLevel(count) {
+  if (count >= 8) return 4;
+  if (count >= 5) return 3;
+  if (count >= 3) return 2;
+  if (count >= 1) return 1;
+  return 0;
+}
+
+function renderUserHeatmaps() {
+  const container = document.getElementById('userHeatmapContainer');
+  if (!container) return;
+
+  if (!Array.isArray(heatmapUsers) || !heatmapUsers.length) {
+    container.innerHTML = '<p class="text-sm text-gray-500">표시할 활동 기록이 없습니다.</p>';
+    return;
   }
-});
 
+  const totalDays = Math.floor((heatmapEnd - heatmapStart) / 86400000) + 1;
+  const monthLabelMap = new Map();
+  let prevMonth = null;
 
-// ✅ 틀린 단어 모달 표시 함수
+  for (let i = 0; i < totalDays; i++) {
+    const dt = new Date(heatmapStart);
+    dt.setDate(heatmapStart.getDate() + i);
+    const weekIndex = Math.floor(i / 7);
+    const month = dt.getMonth();
+    if ((prevMonth === null || month !== prevMonth) && !monthLabelMap.has(weekIndex)) {
+      monthLabelMap.set(weekIndex, getMonthLabel(dt));
+    }
+    prevMonth = month;
+  }
+
+  const monthHeader = Array.from({ length: 53 }, (_, idx) => `<div>${monthLabelMap.get(idx) || ''}</div>`).join('');
+
+  const cards = heatmapUsers.map((user) => {
+    const dateMap = user.dates || {};
+    let cells = '';
+
+    for (let i = 0; i < totalDays; i++) {
+      const dt = new Date(heatmapStart);
+      dt.setDate(heatmapStart.getDate() + i);
+      const dateKey = toDateKey(dt);
+      const activity = dateMap[dateKey] || { count: 0, avg_score: 0 };
+      const count = Number(activity.count || 0);
+      const avgScore = Number(activity.avg_score || 0);
+      const level = getLevel(count);
+      const title = `${user.user_name} | ${dateKey} | 테스트 ${count}회 | 평균 ${avgScore.toFixed(1)}%`;
+      cells += `<div class="heatmap-cell ${level ? `l${level}` : ''}" title="${title}"></div>`;
+    }
+
+    return `
+      <div class="heatmap-user-card">
+        <div class="flex justify-between items-center mb-2">
+          <h4 class="font-semibold text-gray-800">${user.user_name}</h4>
+          <div class="text-xs text-gray-500">활동일 ${user.active_days}일 · 테스트 ${user.total_tests}회</div>
+        </div>
+        <div class="heatmap-months">${monthHeader}</div>
+        <div class="heatmap-grid-wrap">
+          <div class="heatmap-weekdays">
+            <div>Mon</div><div></div><div>Wed</div><div></div><div>Fri</div><div></div><div></div>
+          </div>
+          <div class="heatmap-grid">${cells}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const legend = `
+    <div class="heatmap-legend">
+      <span>Less</span>
+      <div class="swatch"></div>
+      <div class="swatch l1"></div>
+      <div class="swatch l2"></div>
+      <div class="swatch l3"></div>
+      <div class="swatch l4"></div>
+      <span>More</span>
+    </div>
+  `;
+
+  container.innerHTML = cards + legend;
+}
+
 function showWrongWords(data) {
   const modal = document.getElementById("wrongWordModal");
   const list = document.getElementById("wrongWordList");
@@ -151,7 +287,7 @@ function showWrongWords(data) {
   if (!data || data.length === 0) {
     list.innerHTML = "<li class='text-gray-500'>모든 문제를 맞췄습니다!</li>";
   } else {
-    data.forEach(w => {
+    data.forEach((w) => {
       const word = w.word || w.correct || '(단어 없음)';
       const meaning = w.meaning || '';
       const userInput = w.user || '';
@@ -177,13 +313,11 @@ function showWrongWords(data) {
   modal.classList.add("flex");
 }
 
-// ✅ 모달 닫기
 function closeWrongWordModal() {
   const modal = document.getElementById("wrongWordModal");
   modal.classList.add("hidden");
 }
 
-// ✅ 전체 보기 토글
 function toggleViewAll(checked) {
   const form = document.getElementById('searchForm');
   const input = document.getElementById('viewAllInput');
@@ -198,14 +332,13 @@ function applyUserBadgeColors() {
   const badges = document.querySelectorAll('.user-badge');
   if (!badges.length) return;
 
-  // 사용자별 고정 색상 맵: 권혁재는 항상 초록색(emerald)
   const userColorMap = {
     '박영진': ['bg-purple-100', 'text-purple-700'],
     '권혁재': ['bg-emerald-100', 'text-emerald-700'],
     '권유현': ['bg-blue-100', 'text-blue-700'],
     'GUEST': ['bg-amber-100', 'text-amber-700'],
   };
-  
+
   const fallbackPalette = [
     ['bg-rose-100', 'text-rose-700'],
     ['bg-cyan-100', 'text-cyan-700'],
@@ -234,6 +367,7 @@ function applyUserBadgeColors() {
   });
 }
 
+renderUserHeatmaps();
 applyUserBadgeColors();
 </script>
 {% endblock %}
