@@ -33,9 +33,10 @@ USERS = [
     {"id": "user2", "name": "권혁재", "user_id": "권혁재", "is_admin": False},
     {"id": "user3", "name": "권유현", "user_id": "권유현", "is_admin": False},
     {"id": "user4", "name": "GUEST", "user_id": "GUEST", "is_admin": False},
-    {"id": "user5", "name": "사용자5", "user_id": "사용자5", "is_admin": False},
-    {"id": "user6", "name": "사용자6", "user_id": "사용자6", "is_admin": False},
 ]
+
+# 로그인 드롭다운에 표시할 DB 사용자 최대 수
+LOGIN_USER_OPTION_LIMIT = 20
 
 # ✅ 로그인 체크 데코레이터
 def login_required(f):
@@ -145,9 +146,17 @@ class WordUser(db.Model):
 # ✅ 로그인 페이지
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # 정적 사용자 + DB 등록 사용자 목록을 합쳐 로그인 선택지로 사용
+    # 정적 사용자 + DB 최근 사용자 목록을 합쳐 로그인 선택지로 사용
     static_names = [u['name'] for u in USERS if u.get('name')]
-    registered_users_query = text("SELECT DISTINCT user_name FROM word_users ORDER BY user_name")
+
+    # 사용자가 너무 많아지는 문제를 줄이기 위해 최근 등록 사용자만 제한적으로 노출
+    registered_users_query = text(f"""
+        SELECT TOP {LOGIN_USER_OPTION_LIMIT} user_name
+        FROM word_users
+        WHERE user_name IS NOT NULL AND LTRIM(RTRIM(user_name)) <> ''
+        GROUP BY user_name
+        ORDER BY MAX(id) DESC
+    """)
     registered_names = [r.user_name for r in db.session.execute(registered_users_query).fetchall() if r.user_name]
     available_names = sorted(set(static_names + registered_names), key=lambda value: value.lower())
 
@@ -679,6 +688,121 @@ def learning_log():
     if selected_user:
         formatted_logs = [log for log in formatted_logs if log.get("user_name") == selected_user]
 
+    # 기존 test_words(JSON) 데이터를 재활용한 사용자별 누적 오답 통계
+    wrong_word_stats = {}
+    for log in formatted_logs:
+        completed_at = log.get("completed_at")
+        wrong_items = log.get("test_words") or []
+
+        for item in wrong_items:
+            if isinstance(item, dict):
+                raw_word = (item.get("word") or item.get("correct") or "").strip()
+                meaning = (item.get("meaning") or "").strip()
+                user_input = (item.get("user") or "").strip()
+            else:
+                raw_word = str(item or "").strip()
+                meaning = ""
+                user_input = ""
+
+            if not raw_word:
+                continue
+
+            key = raw_word.lower()
+            if key not in wrong_word_stats:
+                wrong_word_stats[key] = {
+                    "word": raw_word,
+                    "meaning": meaning,
+                    "wrong_count": 0,
+                    "last_wrong_at": None,
+                    "last_input": "",
+                }
+
+            stat = wrong_word_stats[key]
+            stat["wrong_count"] += 1
+
+            if meaning and not stat.get("meaning"):
+                stat["meaning"] = meaning
+
+            if completed_at and (stat["last_wrong_at"] is None or completed_at > stat["last_wrong_at"]):
+                stat["last_wrong_at"] = completed_at
+                stat["last_input"] = user_input
+                stat["word"] = raw_word
+
+    wrong_word_top = []
+    for stat in wrong_word_stats.values():
+        wrong_word_top.append({
+            "word": stat.get("word") or "",
+            "meaning": stat.get("meaning") or "",
+            "wrong_count": int(stat.get("wrong_count") or 0),
+            "last_input": stat.get("last_input") or "",
+            "last_wrong_at": stat["last_wrong_at"].strftime("%Y-%m-%d %H:%M") if stat.get("last_wrong_at") else "",
+        })
+
+    wrong_word_top.sort(key=lambda x: (x.get("wrong_count", 0), x.get("last_wrong_at", "")), reverse=True)
+
+    # 테스트 제목별 누적 오답 통계 (지난 시험 제외/선택 복습용)
+    wrong_word_stats_by_title = {}
+    wrong_word_title_options = []
+
+    for log in formatted_logs:
+        title = (log.get("test_name") or "Unknown").strip() or "Unknown"
+        if title not in wrong_word_stats_by_title:
+            wrong_word_stats_by_title[title] = {}
+            wrong_word_title_options.append(title)
+
+        completed_at = log.get("completed_at")
+        wrong_items = log.get("test_words") or []
+
+        for item in wrong_items:
+            if isinstance(item, dict):
+                raw_word = (item.get("word") or item.get("correct") or "").strip()
+                meaning = (item.get("meaning") or "").strip()
+                user_input = (item.get("user") or "").strip()
+            else:
+                raw_word = str(item or "").strip()
+                meaning = ""
+                user_input = ""
+
+            if not raw_word:
+                continue
+
+            title_stats = wrong_word_stats_by_title[title]
+            key = raw_word.lower()
+            if key not in title_stats:
+                title_stats[key] = {
+                    "word": raw_word,
+                    "meaning": meaning,
+                    "wrong_count": 0,
+                    "last_wrong_at": None,
+                    "last_input": "",
+                }
+
+            stat = title_stats[key]
+            stat["wrong_count"] += 1
+
+            if meaning and not stat.get("meaning"):
+                stat["meaning"] = meaning
+
+            if completed_at and (stat["last_wrong_at"] is None or completed_at > stat["last_wrong_at"]):
+                stat["last_wrong_at"] = completed_at
+                stat["last_input"] = user_input
+                stat["word"] = raw_word
+
+    wrong_word_top_by_title = {}
+    for title, stats_map in wrong_word_stats_by_title.items():
+        items = []
+        for stat in stats_map.values():
+            items.append({
+                "word": stat.get("word") or "",
+                "meaning": stat.get("meaning") or "",
+                "wrong_count": int(stat.get("wrong_count") or 0),
+                "last_input": stat.get("last_input") or "",
+                "last_wrong_at": stat["last_wrong_at"].strftime("%Y-%m-%d %H:%M") if stat.get("last_wrong_at") else "",
+            })
+
+        items.sort(key=lambda x: (x.get("wrong_count", 0), x.get("last_wrong_at", "")), reverse=True)
+        wrong_word_top_by_title[title] = items
+
     today_kst = datetime.now(KST).date()
     heatmap_start = today_kst - timedelta(days=364)
     user_daily_map = {}
@@ -727,6 +851,9 @@ def learning_log():
     return render_template(
         'learning_log.html',
         logs=formatted_logs,
+        wrong_word_top=wrong_word_top,
+        wrong_word_top_by_title=wrong_word_top_by_title,
+        wrong_word_title_options=wrong_word_title_options,
         summary=summary,
         q=q,
         test_names=test_names,
@@ -785,6 +912,196 @@ def word_search():
                           words=results, 
                           search_query=search_query, 
                           search_type=search_type)
+
+
+@app.route('/duplicate_words')
+@login_required
+def duplicate_words():
+    """등록 단어 중 중복 단어를 source별 피벗 테이블로 표시"""
+    user_sources = get_user_sources()
+    if not user_sources:
+        return render_template(
+            'duplicate_words.html',
+            sources=[],
+            rows=[],
+            duplicate_word_count=0,
+            total_occurrences=0,
+        )
+
+    source_params = {f'src{i}': src for i, src in enumerate(user_sources)}
+    source_placeholders = ', '.join([f':src{i}' for i in range(len(user_sources))])
+
+    query = text(f"""
+        SELECT
+            LOWER(LTRIM(RTRIM(w.word))) AS word_key,
+            MIN(LTRIM(RTRIM(w.word))) AS display_word,
+            t.source AS source,
+            COUNT(*) AS cnt
+        FROM words_rows w
+        JOIN text_records_rows t ON t.id = w.text_id
+        WHERE w.word IS NOT NULL
+          AND LTRIM(RTRIM(w.word)) <> ''
+          AND t.source IN ({source_placeholders})
+        GROUP BY LOWER(LTRIM(RTRIM(w.word))), t.source
+    """)
+
+    result = db.session.execute(query, source_params).fetchall()
+
+    # word_key 기준으로 source별 출현 횟수 피벗
+    word_map = {}
+    for row in result:
+        key = row.word_key
+        if key not in word_map:
+            word_map[key] = {
+                'word': row.display_word,
+                'by_source': {},
+                'total': 0,
+                'source_count': 0,
+            }
+
+        count_value = int(row.cnt or 0)
+        word_map[key]['by_source'][row.source] = count_value
+        word_map[key]['total'] += count_value
+
+    for item in word_map.values():
+        item['source_count'] = sum(1 for src in user_sources if item['by_source'].get(src, 0) > 0)
+
+    # 중복 기준: 서로 다른 source 2개 이상
+    rows = [
+        {
+            'word': item['word'],
+            'total': item['total'],
+            'source_count': item['source_count'],
+            'by_source': item['by_source'],
+        }
+        for item in word_map.values()
+        if item['source_count'] > 1
+    ]
+
+    rows.sort(key=lambda x: (-x['source_count'], -x['total'], x['word'].lower()))
+
+    # source 정렬: 중복 단어가 많은 순 (내림차순)
+    source_duplicate_counts = {src: 0 for src in user_sources}
+    for row in rows:
+        for src in user_sources:
+            if row['by_source'].get(src, 0) > 0:
+                source_duplicate_counts[src] += 1
+
+    ordered_sources = sorted(
+        user_sources,
+        key=lambda src: (-source_duplicate_counts[src], src.lower())
+    )
+
+    # source 단위 상관성: 단어 존재 여부(0/1) 기반 Jaccard 유사도
+    source_word_sets = {src: set() for src in user_sources}
+    for item in word_map.values():
+        for src in user_sources:
+            if item['by_source'].get(src, 0) > 0:
+                source_word_sets[src].add(item['word'])
+
+    similarity_pairs = []
+    for i, left_source in enumerate(ordered_sources):
+        left_set = source_word_sets[left_source]
+        for right_source in ordered_sources[i + 1:]:
+            right_set = source_word_sets[right_source]
+            inter_cnt = len(left_set & right_set)
+            union_cnt = len(left_set | right_set)
+            jaccard = (inter_cnt / union_cnt) if union_cnt else 0.0
+
+            similarity_pairs.append({
+                'left_source': left_source,
+                'right_source': right_source,
+                'intersection_count': inter_cnt,
+                'union_count': union_cnt,
+                'jaccard': jaccard,
+            })
+
+    similarity_pairs.sort(key=lambda x: (-x['jaccard'], -x['intersection_count'], x['left_source'], x['right_source']))
+    top_similarity_pairs = similarity_pairs[:20]
+
+    # 유사도 히트맵용 매트릭스 데이터
+    pair_lookup = {}
+    for pair in similarity_pairs:
+        left_source = pair['left_source']
+        right_source = pair['right_source']
+        pair_lookup[(left_source, right_source)] = pair
+        pair_lookup[(right_source, left_source)] = pair
+
+    similarity_matrix = []
+    for row_source in ordered_sources:
+        cells = []
+        for col_source in ordered_sources:
+            if row_source == col_source:
+                cells.append({
+                    'jaccard': 1.0,
+                    'intersection_count': len(source_word_sets[row_source]),
+                    'is_diagonal': True,
+                })
+            else:
+                pair = pair_lookup.get((row_source, col_source))
+                if pair:
+                    cells.append({
+                        'jaccard': pair['jaccard'],
+                        'intersection_count': pair['intersection_count'],
+                        'is_diagonal': False,
+                    })
+                else:
+                    cells.append({
+                        'jaccard': 0.0,
+                        'intersection_count': 0,
+                        'is_diagonal': False,
+                    })
+
+        similarity_matrix.append({
+            'source': row_source,
+            'cells': cells,
+        })
+
+    # source 선택 시 보여줄 추천 목록 (유사도 상위 3개)
+    source_recommendations = {}
+    for src in ordered_sources:
+        candidates = []
+        for target in ordered_sources:
+            if src == target:
+                continue
+            pair = pair_lookup.get((src, target))
+            if not pair:
+                continue
+
+            candidates.append({
+                'source': target,
+                'jaccard': pair['jaccard'],
+                'intersection_count': pair['intersection_count'],
+            })
+
+        candidates.sort(key=lambda x: (-x['jaccard'], -x['intersection_count'], x['source']))
+        source_recommendations[src] = candidates[:3]
+
+    source_stats = []
+    duplicate_words = rows
+    for src in ordered_sources:
+        total_unique = len(source_word_sets[src])
+        duplicate_unique = sum(1 for row in duplicate_words if row['by_source'].get(src, 0) > 0)
+        duplicate_ratio = (duplicate_unique / total_unique) if total_unique else 0.0
+
+        source_stats.append({
+            'source': src,
+            'total_unique_words': total_unique,
+            'duplicate_words': duplicate_unique,
+            'duplicate_ratio': duplicate_ratio,
+        })
+
+    return render_template(
+        'duplicate_words.html',
+        sources=ordered_sources,
+        rows=rows,
+        duplicate_word_count=len(rows),
+        total_occurrences=sum(r['total'] for r in rows),
+        top_similarity_pairs=top_similarity_pairs,
+        similarity_matrix=similarity_matrix,
+        source_recommendations=source_recommendations,
+        source_stats=source_stats,
+    )
 
 
 # ✅ 단어 검색 API (구글이 사용중)

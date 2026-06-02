@@ -160,6 +160,63 @@ let resultSaved = false;
 let selectedQuestionCount = 10;
 let promptMode = 'definition';
 
+function initializeTestSession(selectedWords, titleLabel = '') {
+  if (!Array.isArray(selectedWords) || selectedWords.length === 0) {
+    alert('출제할 단어가 없습니다.');
+    return false;
+  }
+
+  words = selectedWords;
+  testTextId = titleLabel ? 'wrong_review' : (document.getElementById('textSelector').value || 'Unknown');
+  testTextTitle = titleLabel || (() => {
+    const selector = document.getElementById('textSelector');
+    return selector?.options?.[selector.selectedIndex]?.text || 'Custom';
+  })();
+  startTime = Date.now();
+  resultSaved = false;
+
+  currentIndex = 0;
+  correctCount = 0;
+  wrongCount = 0;
+  wrongAnswers = [];
+
+  document.getElementById('testArea').classList.remove('hidden');
+  document.getElementById('totalNum').textContent = words.length;
+  showQuestion();
+  return true;
+}
+
+function tryStartReviewFromSession() {
+  const raw = sessionStorage.getItem('wm_review_words');
+  if (!raw) return;
+
+  sessionStorage.removeItem('wm_review_words');
+
+  try {
+    const payload = JSON.parse(raw);
+    const reviewWords = Array.isArray(payload?.words) ? payload.words : [];
+    const normalized = reviewWords
+      .map(item => ({
+        id: item.id || '',
+        word: String(item.word || '').trim().toLowerCase(),
+        meaning: String(item.meaning || '').trim(),
+        example: String(item.example || '').trim(),
+        length: String(item.word || '').trim().length
+      }))
+      .filter(item => item.word);
+
+    if (!normalized.length) {
+      alert('오답 복습 단어가 비어 있습니다.');
+      return;
+    }
+
+    promptMode = 'definition';
+    initializeTestSession(normalized, payload?.label || '오답 복습');
+  } catch (err) {
+    console.error('오답 복습 시작 실패:', err);
+  }
+}
+
 function getSelectedPromptMode() {
   const selected = document.querySelector('input[name="promptMode"]:checked');
   return selected ? selected.value : 'definition';
@@ -216,22 +273,9 @@ async function startSpellingTest() {
 
     // 이미 랜덤으로 선택되어 왔으므로 추가 섞기 불필요
     
-    // 테스트 정보 저장
-    testTextId = textId;
     const selector = document.getElementById('textSelector');
-    testTextTitle = selector.options[selector.selectedIndex].text;
-    startTime = Date.now();
-    resultSaved = false;
-    
-    currentIndex = 0;
-    correctCount = 0;
-    wrongCount = 0;
-    wrongAnswers = [];
-    
-    document.getElementById('testArea').classList.remove('hidden');
-    document.getElementById('totalNum').textContent = words.length;
-    
-    showQuestion();
+    const selectedTitle = selector?.options?.[selector.selectedIndex]?.text || 'Custom';
+    initializeTestSession(words, selectedTitle);
   } catch (error) {
     console.error('단어 로드 실패:', error);
     alert('단어를 불러오는데 실패했습니다.');
@@ -477,6 +521,8 @@ function restartTest() {
   closeResultModal();
   startSpellingTest();
 }
+
+tryStartReviewFromSession();
 </script>
 
 {% endblock %}

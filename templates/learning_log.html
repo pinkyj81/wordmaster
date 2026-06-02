@@ -124,6 +124,7 @@
 
       <input type="hidden" name="view_all" value="{{ '1' if view_all else '0' }}" id="viewAllInput">
       <button type="submit" class="px-3 py-2 bg-indigo-600 text-white rounded">검색</button>
+      <button type="button" onclick="openWrongWordTopModal()" class="px-3 py-2 bg-purple-600 text-white rounded hover:bg-purple-700">누적 오답 TOP</button>
       {% if q or selected_user %}
         <a href="/learning_log?view_all={{ '1' if view_all else '0' }}" class="px-3 py-2 bg-gray-200 rounded">초기화</a>
       {% endif %}
@@ -181,10 +182,37 @@
   </div>
 </div>
 
+<div id="wrongWordTopModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+  <div class="bg-white rounded-xl p-6 w-[560px] shadow-lg max-h-[80vh] overflow-y-auto">
+    <h3 class="text-lg font-semibold text-gray-800 mb-2">누적 오답 TOP</h3>
+    <p class="text-xs text-gray-500 mb-3">현재 검색/사용자 필터 기준으로 집계됩니다.</p>
+    <div class="mb-3">
+      <label for="wrongWordTitleFilter" class="block text-xs text-gray-600 mb-1">테스트 제목 선택</label>
+      <select id="wrongWordTitleFilter" class="w-full border rounded px-3 py-2 text-sm" onchange="renderWrongWordTopList()">
+        <option value="__all__">전체 제목</option>
+      </select>
+    </div>
+    <ul id="wrongWordTopList" class="space-y-2 text-gray-700 mb-4"></ul>
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex gap-2">
+        <button type="button" onclick="startWrongWordReview(10)" class="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">TOP 10 복습</button>
+        <button type="button" onclick="startWrongWordReview(20)" class="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">TOP 20 복습</button>
+        <button type="button" onclick="startWrongWordReview(30)" class="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">TOP 30 복습</button>
+        <button type="button" onclick="printWrongWordTop()" class="px-3 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm">프린트</button>
+      </div>
+      <button type="button" onclick="closeWrongWordTopModal()" class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600">닫기</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const heatmapUsers = {{ heatmap_users | tojson }};
 const heatmapStart = new Date("{{ heatmap_start }}T00:00:00");
 const heatmapEnd = new Date("{{ heatmap_end }}T00:00:00");
+const wrongWordTop = {{ wrong_word_top | tojson }};
+const wrongWordTopByTitle = {{ wrong_word_top_by_title | tojson }};
+const wrongWordTitleOptions = {{ wrong_word_title_options | tojson }};
+let currentWrongWordTop = Array.isArray(wrongWordTop) ? wrongWordTop : [];
 
 function getMonthLabel(dt) {
   return dt.toLocaleString('en-US', { month: 'short' });
@@ -214,13 +242,23 @@ function renderUserHeatmaps() {
     return;
   }
 
-  const totalDays = Math.floor((heatmapEnd - heatmapStart) / 86400000) + 1;
+  const MS_PER_DAY = 86400000;
+  const toMondayIndex = (day) => (day + 6) % 7; // Mon=0 ... Sun=6
+
+  // 요일 축이 정확히 맞도록 월요일 시작 주간 그리드로 맞춘다.
+  const gridStart = new Date(heatmapStart);
+  gridStart.setDate(gridStart.getDate() - toMondayIndex(gridStart.getDay()));
+
+  const rangeDays = Math.floor((heatmapEnd - gridStart) / MS_PER_DAY) + 1;
+  const totalGridDays = Math.ceil(rangeDays / 7) * 7;
+  const totalWeeks = Math.max(53, Math.ceil(totalGridDays / 7));
+
   const monthLabelMap = new Map();
   let prevMonth = null;
 
-  for (let i = 0; i < totalDays; i++) {
-    const dt = new Date(heatmapStart);
-    dt.setDate(heatmapStart.getDate() + i);
+  for (let i = 0; i < totalGridDays; i++) {
+    const dt = new Date(gridStart);
+    dt.setDate(gridStart.getDate() + i);
     const weekIndex = Math.floor(i / 7);
     const month = dt.getMonth();
     if ((prevMonth === null || month !== prevMonth) && !monthLabelMap.has(weekIndex)) {
@@ -229,16 +267,23 @@ function renderUserHeatmaps() {
     prevMonth = month;
   }
 
-  const monthHeader = Array.from({ length: 53 }, (_, idx) => `<div>${monthLabelMap.get(idx) || ''}</div>`).join('');
+  const monthHeader = Array.from({ length: totalWeeks }, (_, idx) => `<div>${monthLabelMap.get(idx) || ''}</div>`).join('');
 
   const cards = heatmapUsers.map((user) => {
     const dateMap = user.dates || {};
     let cells = '';
 
-    for (let i = 0; i < totalDays; i++) {
-      const dt = new Date(heatmapStart);
-      dt.setDate(heatmapStart.getDate() + i);
+    for (let i = 0; i < totalGridDays; i++) {
+      const dt = new Date(gridStart);
+      dt.setDate(gridStart.getDate() + i);
       const dateKey = toDateKey(dt);
+
+      // 요청 범위 밖 날짜는 빈 셀로 표시
+      if (dt < heatmapStart || dt > heatmapEnd) {
+        cells += `<div class="heatmap-cell" title="${dateKey} | 범위 خارج"></div>`;
+        continue;
+      }
+
       const activity = dateMap[dateKey] || { count: 0, avg_score: 0 };
       const count = Number(activity.count || 0);
       const avgScore = Number(activity.avg_score || 0);
@@ -316,6 +361,175 @@ function showWrongWords(data) {
 function closeWrongWordModal() {
   const modal = document.getElementById("wrongWordModal");
   modal.classList.add("hidden");
+}
+
+function openWrongWordTopModal() {
+  const modal = document.getElementById("wrongWordTopModal");
+  const select = document.getElementById("wrongWordTitleFilter");
+  if (!modal) return;
+
+  if (select) {
+    select.innerHTML = '<option value="__all__">전체 제목</option>';
+    (wrongWordTitleOptions || []).forEach((title) => {
+      const opt = document.createElement('option');
+      opt.value = title;
+      opt.textContent = title;
+      select.appendChild(opt);
+    });
+    select.value = '__all__';
+  }
+
+  renderWrongWordTopList();
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+}
+
+function renderWrongWordTopList() {
+  const list = document.getElementById("wrongWordTopList");
+  const select = document.getElementById("wrongWordTitleFilter");
+  if (!list) return;
+
+  list.innerHTML = "";
+  const selectedTitle = select?.value || '__all__';
+  const baseList = selectedTitle === '__all__'
+    ? (Array.isArray(wrongWordTop) ? wrongWordTop : [])
+    : (Array.isArray(wrongWordTopByTitle?.[selectedTitle]) ? wrongWordTopByTitle[selectedTitle] : []);
+
+  currentWrongWordTop = baseList;
+
+  if (!Array.isArray(baseList) || baseList.length === 0) {
+    list.innerHTML = "<li class='text-gray-500'>누적 오답 데이터가 없습니다.</li>";
+  } else {
+    baseList.slice(0, 100).forEach((item, idx) => {
+      const li = document.createElement("li");
+      li.className = "p-2 rounded bg-gray-50 border border-gray-100";
+      const word = item.word || "(단어 없음)";
+      const meaning = item.meaning || "";
+      const count = Number(item.wrong_count || 0);
+      const lastInput = item.last_input || "";
+      const lastAt = item.last_wrong_at || "";
+
+      li.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="font-semibold text-gray-800">${idx + 1}. ${word}${meaning ? ` — ${meaning}` : ''}</div>
+          <div class="text-xs px-2 py-1 rounded bg-red-100 text-red-700">${count}회</div>
+        </div>
+        <div class="text-xs text-gray-500 mt-1">
+          ${lastInput ? `최근 입력: ${lastInput}` : '최근 입력: -'}
+          ${lastAt ? ` · 최근 오답: ${lastAt}` : ''}
+        </div>
+      `;
+      list.appendChild(li);
+    });
+  }
+}
+
+function closeWrongWordTopModal() {
+  const modal = document.getElementById("wrongWordTopModal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+}
+
+function startWrongWordReview(limit) {
+  if (!Array.isArray(currentWrongWordTop) || currentWrongWordTop.length === 0) {
+    alert('복습할 오답 데이터가 없습니다.');
+    return;
+  }
+
+  const selected = currentWrongWordTop
+    .slice(0, Math.max(1, Number(limit) || 10))
+    .map(item => ({
+      word: String(item.word || '').trim().toLowerCase(),
+      meaning: String(item.meaning || '').trim(),
+      example: ''
+    }))
+    .filter(item => item.word);
+
+  if (!selected.length) {
+    alert('복습할 오답 데이터가 없습니다.');
+    return;
+  }
+
+  sessionStorage.setItem('wm_review_words', JSON.stringify({
+    label: `누적 오답 TOP ${selected.length}`,
+    words: selected
+  }));
+  window.location.href = '/spelling_test';
+}
+
+function printWrongWordTop() {
+  if (!Array.isArray(currentWrongWordTop) || currentWrongWordTop.length === 0) {
+    alert('프린트할 오답 데이터가 없습니다.');
+    return;
+  }
+
+  const select = document.getElementById('wrongWordTitleFilter');
+  const selectedTitle = select && select.value && select.value !== '__all__' ? select.value : '전체 제목';
+
+  const rowsHtml = currentWrongWordTop.slice(0, 100).map((item, idx) => {
+    const word = item.word || '(단어 없음)';
+    const meaning = item.meaning || '';
+    const count = Number(item.wrong_count || 0);
+    const lastInput = item.last_input || '-';
+    const lastAt = item.last_wrong_at || '-';
+    return `
+      <tr>
+        <td>${idx + 1}</td>
+        <td>${word}</td>
+        <td>${meaning}</td>
+        <td>${count}</td>
+        <td>${lastInput}</td>
+        <td>${lastAt}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const printWindow = window.open('', '_blank', 'width=1024,height=768');
+  if (!printWindow) {
+    alert('팝업이 차단되어 프린트를 열 수 없습니다.');
+    return;
+  }
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+      <meta charset="UTF-8">
+      <title>누적 오답 TOP 프린트</title>
+      <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 24px; color: #111827; }
+        h1 { margin: 0 0 8px; font-size: 24px; }
+        .meta { margin-bottom: 14px; color: #4b5563; font-size: 13px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; font-size: 12px; }
+        th { background: #f3f4f6; }
+        td:nth-child(1), td:nth-child(4) { text-align: center; }
+      </style>
+    </head>
+    <body>
+      <h1>누적 오답 TOP</h1>
+      <div class="meta">제목 필터: ${selectedTitle} | 출력시각: ${new Date().toLocaleString('ko-KR')}</div>
+      <table>
+        <thead>
+          <tr>
+            <th>No</th>
+            <th>단어</th>
+            <th>뜻</th>
+            <th>오답횟수</th>
+            <th>최근 입력</th>
+            <th>최근 오답</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </body>
+    </html>
+  `);
+
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
 }
 
 function toggleViewAll(checked) {

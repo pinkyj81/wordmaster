@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="p-8">
+  <h2 class="text-2xl font-bold mb-2 text-gray-800">중복 단어 확인</h2>
+  <p class="text-sm text-gray-500 mb-1">행은 단어, 열은 source입니다. 셀에는 해당 source에서의 출현 횟수가 표시됩니다.</p>
+  <p class="text-xs text-gray-500 mb-6">source 열은 중복 단어가 많은 순으로 정렬됩니다.</p>
+
+  <div class="bg-white rounded-xl shadow p-4 mb-4">
+    <div class="flex items-center gap-6 text-sm text-gray-700">
+      <div>중복 단어 수: <span class="font-bold text-indigo-600">{{ duplicate_word_count }}</span></div>
+      <div>중복 총 출현 수: <span class="font-bold text-indigo-600">{{ total_occurrences }}</span></div>
+      <div class="text-xs text-gray-500">중복 기준: 서로 다른 source 2개 이상</div>
+    </div>
+  </div>
+
+  {% if top_similarity_pairs %}
+  <div class="bg-white rounded-xl shadow p-4 mb-4">
+    <h3 class="text-lg font-bold text-gray-800 mb-2">상위 source 유사도 (Jaccard)</h3>
+    <p class="text-xs text-gray-500 mb-3">값이 클수록 두 source가 공유하는 단어 비율이 높습니다.</p>
+    <div class="overflow-auto">
+      <table class="min-w-full border-collapse text-sm">
+        <thead>
+          <tr class="bg-emerald-100 text-gray-800">
+            <th class="p-2 border text-left">source A</th>
+            <th class="p-2 border text-left">source B</th>
+            <th class="p-2 border text-center">공통 단어</th>
+            <th class="p-2 border text-center">합집합</th>
+            <th class="p-2 border text-center">Jaccard</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pair in top_similarity_pairs %}
+          <tr class="hover:bg-gray-50 text-gray-700">
+            <td class="p-2 border">{{ pair.left_source }}</td>
+            <td class="p-2 border">{{ pair.right_source }}</td>
+            <td class="p-2 border text-center">{{ pair.intersection_count }}</td>
+            <td class="p-2 border text-center">{{ pair.union_count }}</td>
+            <td class="p-2 border text-center font-semibold text-emerald-700">{{ '%.3f'|format(pair.jaccard) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if sources and source_recommendations %}
+  <div class="bg-white rounded-xl shadow p-4 mb-4">
+    <h3 class="text-lg font-bold text-gray-800 mb-2">source 추천</h3>
+    <p class="text-xs text-gray-500 mb-3">기준 source를 선택하면 유사도 상위 source 3개를 추천합니다.</p>
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <label for="sourceRecommendSelect" class="text-sm text-gray-700">기준 source</label>
+      <select id="sourceRecommendSelect" class="border rounded px-2 py-1 text-sm">
+        {% for src in sources %}
+        <option value="{{ src }}">{{ src }}</option>
+        {% endfor %}
+      </select>
+      <button type="button" id="sourceRecommendBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-3 py-1.5 rounded">추천 보기</button>
+    </div>
+    <div id="sourceRecommendResult" class="text-sm text-gray-700"></div>
+  </div>
+  {% endif %}
+
+  {% if similarity_matrix and sources %}
+  <div class="bg-white rounded-xl shadow p-4 mb-4">
+    <h3 class="text-lg font-bold text-gray-800 mb-2">source 유사도 히트맵</h3>
+    <p class="text-xs text-gray-500 mb-3">색이 진할수록 Jaccard 유사도가 높습니다.</p>
+    <div class="overflow-auto">
+      <table class="min-w-full border-collapse text-xs">
+        <thead>
+          <tr class="bg-slate-100 text-gray-800">
+            <th class="p-2 border sticky left-0 bg-slate-100 z-10">source</th>
+            {% for src in sources %}
+            <th class="p-2 border whitespace-nowrap">{{ src }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in similarity_matrix %}
+          <tr>
+            <td class="p-2 border font-semibold sticky left-0 bg-white z-10">{{ row.source }}</td>
+            {% for cell in row.cells %}
+            {% set intensity = (cell.jaccard * 100)|round|int %}
+            {% if cell.is_diagonal %}
+            <td class="p-2 border text-center font-bold text-slate-700 bg-slate-200">1.000</td>
+            {% else %}
+            <td class="p-2 border text-center" style="background-color: rgba(16, 185, 129, {{ 0.08 + (cell.jaccard * 0.72) }});" title="공통 단어 {{ cell.intersection_count }}개">
+              <span class="font-semibold text-slate-800">{{ '%.3f'|format(cell.jaccard) }}</span>
+            </td>
+            {% endif %}
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if source_stats %}
+  <div class="bg-white rounded-xl shadow p-4 mb-4">
+    <h3 class="text-lg font-bold text-gray-800 mb-2">source별 중복 커버리지</h3>
+    <p class="text-xs text-gray-500 mb-3">해당 source의 고유 단어 중, 다른 source와 겹치는 단어 비율입니다.</p>
+    <div class="overflow-auto">
+      <table class="min-w-full border-collapse text-sm">
+        <thead>
+          <tr class="bg-amber-100 text-gray-800">
+            <th class="p-2 border text-left">source</th>
+            <th class="p-2 border text-center">고유 단어 수</th>
+            <th class="p-2 border text-center">중복 단어 수</th>
+            <th class="p-2 border text-center">중복 비율</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for stat in source_stats %}
+          <tr class="hover:bg-gray-50 text-gray-700">
+            <td class="p-2 border">{{ stat.source }}</td>
+            <td class="p-2 border text-center">{{ stat.total_unique_words }}</td>
+            <td class="p-2 border text-center">{{ stat.duplicate_words }}</td>
+            <td class="p-2 border text-center font-semibold text-amber-700">{{ '%.1f'|format(stat.duplicate_ratio * 100) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if rows and sources %}
+  <div class="bg-white rounded-xl shadow overflow-auto">
+    <table class="min-w-full border-collapse text-sm">
+      <thead>
+        <tr class="bg-blue-100 text-gray-800">
+          <th class="p-3 border text-left sticky left-0 bg-blue-100 z-10">단어</th>
+          <th class="p-3 border text-center">총출현</th>
+          <th class="p-3 border text-center">source 수</th>
+          {% for src in sources %}
+          <th class="p-3 border text-center whitespace-nowrap">{{ src }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr class="hover:bg-gray-50 text-gray-700">
+          <td class="p-3 border font-semibold sticky left-0 bg-white">{{ row.word }}</td>
+          <td class="p-3 border text-center font-bold text-indigo-600">{{ row.total }}</td>
+          <td class="p-3 border text-center">{{ row.source_count }}</td>
+          {% for src in sources %}
+            {% set count = row.by_source.get(src, 0) %}
+            <td class="p-3 border text-center {{ 'bg-red-50 text-red-700 font-semibold' if count > 0 else 'text-gray-300' }}">
+              {{ count if count > 0 else '-' }}
+            </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="bg-white rounded-xl shadow p-8 text-center text-gray-500">
+    표시할 중복 단어가 없습니다.
+  </div>
+  {% endif %}
+</div>
+
+{% if source_recommendations %}
+<script>
+  (function() {
+    const recommendationMap = {{ source_recommendations|tojson }};
+    const selectEl = document.getElementById('sourceRecommendSelect');
+    const buttonEl = document.getElementById('sourceRecommendBtn');
+    const resultEl = document.getElementById('sourceRecommendResult');
+
+    if (!selectEl || !buttonEl || !resultEl) {
+      return;
+    }
+
+    function renderRecommendations(baseSource) {
+      const items = recommendationMap[baseSource] || [];
+      if (!items.length) {
+        resultEl.innerHTML = '<div class="text-gray-500">추천할 source가 없습니다.</div>';
+        return;
+      }
+
+      const rows = items.map((item, idx) => {
+        const percent = (item.jaccard * 100).toFixed(1);
+        return `<tr class="hover:bg-gray-50">
+          <td class="p-2 border text-center">${idx + 1}</td>
+          <td class="p-2 border">${item.source}</td>
+          <td class="p-2 border text-center font-semibold text-indigo-700">${item.jaccard.toFixed(3)}</td>
+          <td class="p-2 border text-center">${percent}%</td>
+          <td class="p-2 border text-center">${item.intersection_count}</td>
+        </tr>`;
+      }).join('');
+
+      resultEl.innerHTML = `<div class="mb-2 text-gray-700"><span class="font-semibold">${baseSource}</span>와(과) 비슷한 source</div>
+        <div class="overflow-auto">
+          <table class="min-w-full border-collapse text-sm">
+            <thead>
+              <tr class="bg-indigo-100 text-gray-800">
+                <th class="p-2 border text-center">순위</th>
+                <th class="p-2 border text-left">추천 source</th>
+                <th class="p-2 border text-center">Jaccard</th>
+                <th class="p-2 border text-center">유사도(%)</th>
+                <th class="p-2 border text-center">공통 단어</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }
+
+    buttonEl.addEventListener('click', function() {
+      renderRecommendations(selectEl.value);
+    });
+
+    renderRecommendations(selectEl.value);
+  })();
+</script>
+{% endif %}
+{% endblock %}
