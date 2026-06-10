@@ -867,6 +867,69 @@ def learning_log():
     )
 
 
+@app.route('/math_quiz')
+@login_required
+def math_quiz():
+    user_id = session.get('db_user_id', session.get('user_name', 'Unknown'))
+    math_test_name = '수학 꼭짓점 변환 테스트'
+
+    count_row = db.session.execute(
+        text("""
+            SELECT COUNT(*) AS cnt
+            FROM test_records_rows
+            WHERE test_name = :test_name
+              AND user_id = :user_id
+        """),
+        {"test_name": math_test_name, "user_id": user_id}
+    ).fetchone()
+    attempt_count = int(count_row.cnt if hasattr(count_row, 'cnt') else (count_row[0] if count_row else 0))
+
+    rows = db.session.execute(
+        text("""
+            SELECT TOP 30 id, total_questions, correct_answers, score, duration, completed_at, test_words
+            FROM test_records_rows
+            WHERE test_name = :test_name
+              AND user_id = :user_id
+            ORDER BY completed_at DESC
+        """),
+        {"test_name": math_test_name, "user_id": user_id}
+    ).fetchall()
+
+    history = []
+    total_wrong_count = 0
+
+    for row in rows:
+        try:
+            wrong_items = json.loads(row.test_words) if row.test_words else []
+        except Exception:
+            wrong_items = []
+
+        wrong_count = len(wrong_items)
+        total_wrong_count += wrong_count
+
+        history.append({
+            "id": row.id,
+            "completed_at": row.completed_at.strftime('%Y-%m-%d %H:%M') if row.completed_at else '-',
+            "total_questions": int(row.total_questions or 0),
+            "correct_answers": int(row.correct_answers or 0),
+            "score": int(round(float(row.score or 0))),
+            "duration": int(row.duration or 0),
+            "wrong_count": wrong_count,
+            "wrong_items": wrong_items,
+        })
+
+    latest_score = history[0]["score"] if history else None
+
+    return render_template(
+        'math_quiz.html',
+        attempt_count=attempt_count,
+        total_wrong_count=total_wrong_count,
+        latest_score=latest_score,
+        history=history,
+        test_name=math_test_name,
+    )
+
+
 # ✅ 단어 찾기 페이지
 @app.route('/word_search')
 @login_required

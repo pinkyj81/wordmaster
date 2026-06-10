@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-5xl mx-auto py-8 px-4">
+  <div class="bg-white/95 rounded-2xl shadow-xl border border-gray-200 p-6 md:p-10">
+    <p class="text-center text-gray-700 text-xl md:text-2xl mb-4">다음 식을 꼭짓점 꼴로 변환하세요</p>
+
+    <h1 id="questionText" class="text-center text-4xl md:text-6xl font-bold text-slate-900 tracking-tight mb-3">
+      y = 3x² + 30x + 72
+    </h1>
+
+    <p class="text-center text-gray-500 mb-8">y = a(x - p)<sup>2</sup> + q 형태로 변환 (a, p, q를 입력)</p>
+
+    <p class="text-center text-2xl font-semibold text-slate-800 mb-4" id="progressText">1 / 10 문제</p>
+
+    <div class="flex items-center justify-center gap-2 md:gap-3 text-4xl font-bold text-slate-900 mb-3">
+      <span>y=</span>
+      <input id="inputA" type="number" class="w-20 md:w-24 text-center text-2xl md:text-3xl rounded-xl border-2 border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-300 py-2" placeholder="a" />
+      <span>(x -</span>
+      <input id="inputP" type="number" class="w-20 md:w-24 text-center text-2xl md:text-3xl rounded-xl border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-violet-300 py-2" placeholder="p" />
+      <span>)² +</span>
+      <input id="inputQ" type="number" class="w-20 md:w-24 text-center text-2xl md:text-3xl rounded-xl border-2 border-gray-300 focus:outline-none focus:ring-2 focus:ring-violet-300 py-2" placeholder="q" />
+    </div>
+
+    <p id="feedbackText" class="text-center min-h-[28px] text-base font-medium text-gray-600 mb-6"></p>
+
+    <button
+      id="submitBtn"
+      type="button"
+      class="w-full py-4 rounded-xl text-white font-bold text-2xl bg-gradient-to-r from-violet-500 to-indigo-500 hover:from-violet-600 hover:to-indigo-600 transition"
+      onclick="submitAnswer()"
+    >
+      확인
+    </button>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+    <div class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+      <p class="text-sm text-gray-500">누적 테스트 횟수</p>
+      <p id="attemptCount" class="text-3xl font-bold text-indigo-600">{{ attempt_count }}</p>
+    </div>
+    <div class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+      <p class="text-sm text-gray-500">누적 오답 개수</p>
+      <p id="totalWrongCount" class="text-3xl font-bold text-rose-500">{{ total_wrong_count }}</p>
+    </div>
+    <div class="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+      <p class="text-sm text-gray-500">최근 점수</p>
+      <p id="latestScore" class="text-3xl font-bold text-emerald-600">{% if latest_score is not none %}{{ latest_score }}점{% else %}-{% endif %}</p>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl p-5 border border-gray-200 shadow-sm mt-6">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-xl font-bold text-slate-800">최근 수학 테스트 기록</h2>
+      <span class="text-sm text-gray-500">최대 30건 표시</span>
+    </div>
+
+    {% if history %}
+      <div class="space-y-3" id="historyList">
+        {% for item in history %}
+          <details class="rounded-lg border border-gray-200 px-4 py-3">
+            <summary class="cursor-pointer flex flex-wrap gap-3 text-sm md:text-base items-center text-gray-700">
+              <span class="font-semibold">{{ item.completed_at }}</span>
+              <span>점수: <b class="text-indigo-600">{{ item.score }}점</b></span>
+              <span>정답: {{ item.correct_answers }}/{{ item.total_questions }}</span>
+              <span>오답: <b class="text-rose-500">{{ item.wrong_count }}</b>개</span>
+              <span>시간: {{ item.duration }}초</span>
+            </summary>
+            <div class="mt-3 pt-3 border-t text-sm text-gray-700">
+              {% if item.wrong_items %}
+                <ul class="space-y-2 list-disc pl-5">
+                  {% for wrong in item.wrong_items %}
+                    <li>
+                      <span class="font-medium">{{ wrong.word if wrong.word else wrong.correct }}</span>
+                      <span class="text-gray-500"> | 내 답: {{ wrong.user if wrong.user else '-' }}</span>
+                      <span class="text-emerald-700"> | 정답: {{ wrong.correct if wrong.correct else '-' }}</span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <p class="text-emerald-700">오답 없음</p>
+              {% endif %}
+            </div>
+          </details>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p id="historyEmpty" class="text-gray-500">아직 수학 테스트 기록이 없습니다.</p>
+      <div id="historyList" class="space-y-3"></div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+const TOTAL_QUESTIONS = 10;
+const TEST_NAME = {{ test_name | tojson }};
+
+let questions = [];
+let currentIndex = 0;
+let correctCount = 0;
+let wrongAnswers = [];
+let testStartedAt = 0;
+
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function randomA() {
+  const candidates = [-4, -3, -2, -1, 1, 2, 3, 4];
+  return candidates[randInt(0, candidates.length - 1)];
+}
+
+function formatTerm(value, variableText) {
+  if (value === 0) return '';
+  const sign = value > 0 ? '+' : '-';
+  const absVal = Math.abs(value);
+  const coeff = absVal === 1 && variableText ? '' : String(absVal);
+  return `${sign}${coeff}${variableText}`;
+}
+
+function buildQuestion() {
+  const a = randomA();
+  const p = randInt(-6, 6);
+  const q = randInt(-12, 12);
+  const b = -2 * a * p;
+  const c = a * p * p + q;
+
+  const aText = a === 1 ? '' : (a === -1 ? '-' : String(a));
+  const bText = formatTerm(b, 'x');
+  const cText = formatTerm(c, '');
+  const equation = `y=${aText}x²${bText}${cText || ''}`;
+
+  return { a, p, q, equation };
+}
+
+function setupQuestions() {
+  questions = Array.from({ length: TOTAL_QUESTIONS }, buildQuestion);
+  currentIndex = 0;
+  correctCount = 0;
+  wrongAnswers = [];
+  testStartedAt = Date.now();
+
+  document.getElementById('submitBtn').textContent = '확인';
+  document.getElementById('submitBtn').disabled = false;
+  document.getElementById('submitBtn').classList.remove('opacity-60', 'cursor-not-allowed');
+  document.getElementById('feedbackText').textContent = '';
+
+  renderQuestion();
+}
+
+function renderQuestion() {
+  const q = questions[currentIndex];
+  document.getElementById('questionText').textContent = q.equation;
+  document.getElementById('progressText').textContent = `${currentIndex + 1} / ${TOTAL_QUESTIONS} 문제`;
+
+  document.getElementById('inputA').value = '';
+  document.getElementById('inputP').value = '';
+  document.getElementById('inputQ').value = '';
+  document.getElementById('inputA').focus();
+}
+
+function readInputValue(id) {
+  const raw = document.getElementById(id).value.trim();
+  if (raw === '') return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function submitAnswer() {
+  if (currentIndex >= TOTAL_QUESTIONS) return;
+
+  const inputA = readInputValue('inputA');
+  const inputP = readInputValue('inputP');
+  const inputQ = readInputValue('inputQ');
+
+  if (inputA === null || inputP === null || inputQ === null) {
+    document.getElementById('feedbackText').textContent = 'a, p, q를 모두 숫자로 입력하세요.';
+    document.getElementById('feedbackText').className = 'text-center min-h-[28px] text-base font-medium text-rose-500 mb-6';
+    return;
+  }
+
+  const q = questions[currentIndex];
+  const isCorrect = inputA === q.a && inputP === q.p && inputQ === q.q;
+
+  if (isCorrect) {
+    correctCount += 1;
+    document.getElementById('feedbackText').textContent = '정답입니다.';
+    document.getElementById('feedbackText').className = 'text-center min-h-[28px] text-base font-medium text-emerald-600 mb-6';
+  } else {
+    wrongAnswers.push({
+      word: `Q${currentIndex + 1}: ${q.equation}`,
+      meaning: `정답은 a=${q.a}, p=${q.p}, q=${q.q}`,
+      user: `a=${inputA}, p=${inputP}, q=${inputQ}`,
+      correct: `a=${q.a}, p=${q.p}, q=${q.q}`
+    });
+
+    document.getElementById('feedbackText').textContent = `오답입니다. 정답: a=${q.a}, p=${q.p}, q=${q.q}`;
+    document.getElementById('feedbackText').className = 'text-center min-h-[28px] text-base font-medium text-rose-500 mb-6';
+  }
+
+  currentIndex += 1;
+
+  if (currentIndex < TOTAL_QUESTIONS) {
+    setTimeout(renderQuestion, 450);
+    return;
+  }
+
+  finishTest();
+}
+
+function finishTest() {
+  const duration = Math.max(1, Math.round((Date.now() - testStartedAt) / 1000));
+  const score = Math.round((correctCount / TOTAL_QUESTIONS) * 100);
+
+  document.getElementById('questionText').textContent = `테스트 완료 · ${score}점 (${correctCount}/${TOTAL_QUESTIONS})`;
+  document.getElementById('progressText').textContent = '완료';
+  document.getElementById('submitBtn').textContent = '다시 테스트';
+  document.getElementById('submitBtn').onclick = setupQuestions;
+
+  document.getElementById('inputA').value = '';
+  document.getElementById('inputP').value = '';
+  document.getElementById('inputQ').value = '';
+
+  saveResult(score, duration);
+}
+
+function saveResult(score, duration) {
+  fetch('/save_test_result', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      test_name: TEST_NAME,
+      total_questions: TOTAL_QUESTIONS,
+      correct_answers: correctCount,
+      score,
+      duration,
+      wrong_words: wrongAnswers
+    })
+  })
+    .then(res => res.json())
+    .then(() => {
+      const attemptEl = document.getElementById('attemptCount');
+      const wrongEl = document.getElementById('totalWrongCount');
+      const latestEl = document.getElementById('latestScore');
+
+      attemptEl.textContent = String((Number(attemptEl.textContent) || 0) + 1);
+      wrongEl.textContent = String((Number(wrongEl.textContent) || 0) + wrongAnswers.length);
+      latestEl.textContent = `${score}점`;
+
+      prependHistoryItem(score, duration);
+    })
+    .catch(() => {
+      document.getElementById('feedbackText').textContent += ' (기록 저장 실패)';
+    });
+}
+
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function prependHistoryItem(score, duration) {
+  const list = document.getElementById('historyList');
+  const empty = document.getElementById('historyEmpty');
+  if (empty) empty.remove();
+
+  const now = new Date();
+  const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  const wrongHtml = wrongAnswers.length
+    ? `<ul class="space-y-2 list-disc pl-5">${wrongAnswers.map(item => `<li><span class="font-medium">${escapeHtml(item.word)}</span><span class="text-gray-500"> | 내 답: ${escapeHtml(item.user)}</span><span class="text-emerald-700"> | 정답: ${escapeHtml(item.correct)}</span></li>`).join('')}</ul>`
+    : '<p class="text-emerald-700">오답 없음</p>';
+
+  const wrapper = document.createElement('details');
+  wrapper.className = 'rounded-lg border border-gray-200 px-4 py-3';
+  wrapper.innerHTML = `
+    <summary class="cursor-pointer flex flex-wrap gap-3 text-sm md:text-base items-center text-gray-700">
+      <span class="font-semibold">${stamp}</span>
+      <span>점수: <b class="text-indigo-600">${score}점</b></span>
+      <span>정답: ${correctCount}/${TOTAL_QUESTIONS}</span>
+      <span>오답: <b class="text-rose-500">${wrongAnswers.length}</b>개</span>
+      <span>시간: ${duration}초</span>
+    </summary>
+    <div class="mt-3 pt-3 border-t text-sm text-gray-700">${wrongHtml}</div>
+  `;
+
+  list.prepend(wrapper);
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    submitAnswer();
+  }
+});
+
+setupQuestions();
+</script>
+{% endblock %}
