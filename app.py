@@ -1232,10 +1232,11 @@ def tts(word):
     lang = 'en'
     tld = 'com'
     if w and hasattr(w, 'language'):
-        if w.language == 'chinese':
+        language = (w.language or '').strip().lower()
+        if language in ('chinese', 'zh', 'zh-cn', '중국어'):
             lang = 'zh-cn'
             tld = 'com.cn'
-        elif w.language == 'japanese':
+        elif language in ('japanese', 'japaness', 'ja', 'jp', '일본어'):
             lang = 'ja'
             tld = 'co.jp'
     tts = gTTS(word, lang=lang, tld=tld)
