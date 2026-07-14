@@ -33,13 +33,23 @@
       <p id="meaning" class="text-2xl font-medium text-white/90 text-center max-w-xl px-6 leading-snug line-clamp-2"></p>
       <p id="sentence" class="mt-3 text-2xl font-medium text-white/90 text-center max-w-2xl px-8 leading-relaxed"></p>
 
-      <!-- ✅ 발음 듣기 버튼 (이벤트 버블링 방지 포함) -->
-      <button
-        onclick="playSound(event, document.getElementById('wordBack').innerText)"
-        class="mt-6 bg-white text-indigo-600 px-4 py-2 rounded-full shadow hover:bg-indigo-100 flex items-center space-x-2">
-        <span>🔊</span>
-        <span>발음 듣기</span>
-      </button>
+      <!-- ✅ 단어/문장 듣기 버튼 -->
+      <div class="mt-6 flex items-center gap-3">
+        <button
+          onclick="playSound(event, document.getElementById('wordBack').innerText, 'word')"
+          id="wordSoundBtn"
+          class="bg-white text-indigo-600 px-4 py-2 rounded-full shadow hover:bg-indigo-100 flex items-center space-x-2">
+          <span>🔊</span>
+          <span>단어 듣기</span>
+        </button>
+        <button
+          onclick="playSound(event, getSentenceForSpeech(), 'sentence')"
+          id="sentenceSoundBtn"
+          class="bg-white text-indigo-600 px-4 py-2 rounded-full shadow hover:bg-indigo-100 flex items-center space-x-2">
+          <span>🗣️</span>
+          <span>문장 듣기</span>
+        </button>
+      </div>
       <audio id="audio"></audio>
 
       <p class="mt-8 text-sm opacity-80">(클릭하여 다음 단어로)</p>
@@ -55,13 +65,47 @@
 </div>
 
 <script>
-function playSound(event, word) {
+function playSound(event, text, mode) {
   // 카드 클릭 이벤트가 부모로 전달되지 않게 막기
   event.stopPropagation();
 
+  const cleanText = String(text || '').trim();
+  if (!cleanText) {
+    alert(mode === 'sentence' ? '문장이 없습니다.' : '단어가 없습니다.');
+    return;
+  }
+
   const audio = document.getElementById('audio');
-  audio.src = `/tts/${encodeURIComponent(word)}?t=${Date.now()}`; // 캐시 방지
+  const language = (cards[currentIndex]?.language || 'english');
+  const url = `/tts_text?text=${encodeURIComponent(cleanText)}&lang=${encodeURIComponent(language)}&mode=${encodeURIComponent(mode || 'word')}&t=${Date.now()}`;
+  audio.src = url; // 캐시 방지
   audio.play();
+}
+
+function getCurrentSentence() {
+  const sentence = (cards[currentIndex]?.sentence || '').trim();
+  return sentence;
+}
+
+function removeKoreanForSpeech(text) {
+  return String(text || '')
+    // 한글이 포함된 대괄호/소괄호 구간은 통째로 제거
+    .replace(/\s*[\[\(（][^\]\)）]*[\uac00-\ud7a3][^\]\)）]*[\]\)）]\s*/g, ' ')
+    // 남아 있는 한글은 제거
+    .replace(/[\uac00-\ud7a3]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getSentenceForSpeech() {
+  const sentence = getCurrentSentence();
+  if (!sentence) return '';
+
+  const currentWord = String(cards[currentIndex]?.word || '').trim();
+  if (!currentWord) return sentence;
+
+  const replaced = sentence.replace(/_{3,}/g, currentWord);
+  return removeKoreanForSpeech(replaced);
 }
 
 let currentIndex = 0;
@@ -110,6 +154,12 @@ function showCard() {
   document.getElementById("meaning").innerText = card.meaning;
   const sentenceText = (card.sentence || '').trim();
   document.getElementById("sentence").innerText = sentenceText ? `[${sentenceText}]` : '';
+  const sentenceBtn = document.getElementById('sentenceSoundBtn');
+  if (sentenceBtn) {
+    sentenceBtn.disabled = !sentenceText;
+    sentenceBtn.classList.toggle('opacity-40', !sentenceText);
+    sentenceBtn.classList.toggle('cursor-not-allowed', !sentenceText);
+  }
   document.getElementById("progressCount").innerText = `${currentIndex + 1} / ${cards.length}`;
 
   // 초기화 (앞면으로)

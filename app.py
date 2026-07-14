@@ -16,6 +16,41 @@ def now_kst():
     """한국 시간대 기준 현재 시간 반환"""
     return datetime.now(KST).isoformat(timespec='seconds')
 
+
+def normalize_language_value(language_value):
+    language = (language_value or 'english').strip().lower()
+    aliases = {
+        'en': 'english',
+        'english': 'english',
+        '영어': 'english',
+        'ja': 'japanese',
+        'jp': 'japanese',
+        'japanese': 'japanese',
+        'japaness': 'japanese',
+        '일본어': 'japanese',
+        'zh': 'chinese',
+        'zh-cn': 'chinese',
+        'chinese': 'chinese',
+        '중국어': 'chinese',
+    }
+    return aliases.get(language, 'english')
+
+
+def ensure_text_language_column():
+    try:
+        exists = db.session.execute(text("""
+            SELECT 1
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = 'dbo'
+              AND TABLE_NAME = 'text_records_rows'
+              AND COLUMN_NAME = 'language'
+        """)).fetchone()
+        if not exists:
+            db.session.execute(text("ALTER TABLE text_records_rows ADD language NVARCHAR(50) NULL"))
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # 세션 암호화 키
 
@@ -498,7 +533,14 @@ def save_test_result():
 # ✅ 암기카드 페이지
 @app.route('/flashcards/<text_id>')
 def flashcards(text_id):
+    ensure_text_language_column()
     # 암기되지 않은 단어만 가져오기 (is_learned가 False 또는 NULL)
+    text_row = db.session.execute(
+        text("SELECT title, language FROM text_records_rows WHERE id = :id"),
+        {"id": text_id}
+    ).fetchone()
+    text_language = normalize_language_value(getattr(text_row, 'language', None) or 'english')
+
     words = WordsRow.query.filter_by(text_id=text_id).filter(
         or_(WordsRow.is_learned == False, WordsRow.is_learned.is_(None))
     ).all()
@@ -508,6 +550,7 @@ def flashcards(text_id):
             "meaning": w.meaning,
             "text_title": w.text_title,
             "sentence": w.example or "",
+            "language": normalize_language_value(w.language or text_language),
         }
         for w in words
     ]
@@ -1221,25 +1264,38 @@ def api_search_words():
     } for r in results])
 
 
-# ✅ 발음 듣기 (미국식)
+def resolve_gtts_language(language_value):
+    language = (language_value or 'english').strip().lower()
+    if language in ('chinese', 'zh', 'zh-cn', '중국어'):
+        return 'zh-cn', 'com.cn'
+    if language in ('japanese', 'japaness', 'ja', 'jp', '일본어'):
+        return 'ja', 'co.jp'
+    return 'en', 'com'
 
-# ✅ 발음 듣기 (언어 자동 감지: 영어/중국어/일본어)
+
 @app.route('/tts/<word>')
 def tts(word):
-    # 단어의 언어 감지 (DB에서)
+    # 기존 호환용 엔드포인트
     from sqlalchemy import or_
     w = db.session.query(WordsRow).filter(or_(WordsRow.word == word, WordsRow.word == word.strip())).first()
-    lang = 'en'
-    tld = 'com'
-    if w and hasattr(w, 'language'):
-        language = (w.language or '').strip().lower()
-        if language in ('chinese', 'zh', 'zh-cn', '중국어'):
-            lang = 'zh-cn'
-            tld = 'com.cn'
-        elif language in ('japanese', 'japaness', 'ja', 'jp', '일본어'):
-            lang = 'ja'
-            tld = 'co.jp'
+    lang, tld = resolve_gtts_language(w.language if w else 'english')
     tts = gTTS(word, lang=lang, tld=tld)
+    mp3_fp = io.BytesIO()
+    tts.write_to_fp(mp3_fp)
+    mp3_fp.seek(0)
+    return send_file(mp3_fp, mimetype='audio/mpeg')
+
+
+@app.route('/tts_text')
+def tts_text():
+    text_value = (request.args.get('text') or '').strip()
+    language_value = (request.args.get('lang') or 'english').strip()
+
+    if not text_value:
+        return jsonify({'error': 'text is required'}), 400
+
+    lang, tld = resolve_gtts_language(language_value)
+    tts = gTTS(text_value, lang=lang, tld=tld)
     mp3_fp = io.BytesIO()
     tts.write_to_fp(mp3_fp)
     mp3_fp.seek(0)
@@ -1310,14 +1366,68 @@ def update_words():
         return jsonify({"error": str(e)}), 500
 
 
+# ✅ 본문 언어 기준으로 단어 language 일괄 동기화
+@app.route('/sync_word_languages', methods=['POST'])
+def sync_word_languages():
+    try:
+        ensure_text_language_column()
+        data = request.get_json() or {}
+        text_id = (data.get('text_id') or '').strip()
+
+        params = {}
+        if text_id:
+            text_rows = db.session.execute(
+                text("SELECT id, language FROM text_records_rows WHERE id = :text_id"),
+                {"text_id": text_id}
+            ).fetchall()
+        else:
+            text_rows = db.session.execute(
+                text("SELECT id, language FROM text_records_rows")
+            ).fetchall()
+
+        if not text_rows:
+            return jsonify({"error": "대상 본문이 없습니다."}), 400
+
+        updated = 0
+        skipped = 0
+
+        for row in text_rows:
+            parent_text_id = row.id
+            parent_language = normalize_language_value(getattr(row, 'language', None) or 'english')
+
+            result = db.session.execute(text("""
+                UPDATE words_rows
+                SET language = :language,
+                    updated_at = DATEADD(hour, 9, SYSUTCDATETIME())
+                WHERE text_id = :text_id
+            """), {
+                "language": parent_language,
+                "text_id": parent_text_id,
+            })
+            updated += result.rowcount or 0
+
+        db.session.commit()
+        return jsonify({
+            "message": f"단어 language 동기화 완료 ({updated}건)" + (f" / 본문 {text_id}" if text_id else " / 전체 본문"),
+            "updated": updated,
+            "skipped": skipped,
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
 # ✅ 텍스트 업로드
 @app.route('/upload_text', methods=['POST'])
 def upload_text():
     try:
+        ensure_text_language_column()
         data = request.get_json() or {}
         title = (data.get('title') or '').strip()
         source = (data.get('source') or '').strip()
         content = (data.get('content') or '').strip()
+        language = normalize_language_value(data.get('language'))
 
         if not title or not content:
             return jsonify({"error": "제목과 본문 내용을 입력해주세요."}), 400
@@ -1336,10 +1446,10 @@ def upload_text():
             record_id = f"{base_id}_{suffix}"
 
         query = text("""
-            INSERT INTO text_records_rows (id, title, content, source, word_count, created_at, updated_at)
-            VALUES (:id, :title, :content, :source, 0, DATEADD(hour, 9, SYSUTCDATETIME()), DATEADD(hour, 9, SYSUTCDATETIME()))
+            INSERT INTO text_records_rows (id, title, content, source, language, word_count, created_at, updated_at)
+            VALUES (:id, :title, :content, :source, :language, 0, DATEADD(hour, 9, SYSUTCDATETIME()), DATEADD(hour, 9, SYSUTCDATETIME()))
         """)
-        db.session.execute(query, {"id": record_id, "title": title, "content": content, "source": source})
+        db.session.execute(query, {"id": record_id, "title": title, "content": content, "source": source, "language": language})
         db.session.commit()
         return jsonify({"message": f"텍스트 업로드 완료 ({record_id})"})
     except Exception as e:
@@ -1351,8 +1461,10 @@ def upload_text():
 @app.route('/upload_texts_bulk', methods=['POST'])
 def upload_texts_bulk():
     try:
+        ensure_text_language_column()
         data = request.get_json() or {}
         texts = data.get('texts', [])
+        bulk_language = normalize_language_value(data.get('language'))
 
         if not isinstance(texts, list) or not texts:
             return jsonify({"error": "본문 데이터가 없습니다."}), 400
@@ -1365,6 +1477,7 @@ def upload_texts_bulk():
             row_title = (item.get('title') or '').strip()
             row_source = (item.get('source') or '').strip()
             row_content = (item.get('content') or '').strip()
+            row_language = normalize_language_value(item.get('language') or bulk_language)
             if not row_title or not row_content:
                 continue
             normalized.append({
@@ -1372,6 +1485,7 @@ def upload_texts_bulk():
                 "title": row_title,
                 "source": row_source,
                 "content": row_content,
+                "language": row_language,
             })
 
         if not normalized:
@@ -1401,13 +1515,14 @@ def upload_texts_bulk():
                     record_id = f"{base_id}_{suffix}"
 
             db.session.execute(text("""
-                INSERT INTO text_records_rows (id, title, content, source, word_count, created_at, updated_at)
-                VALUES (:id, :title, :content, :source, 0, DATEADD(hour, 9, SYSUTCDATETIME()), DATEADD(hour, 9, SYSUTCDATETIME()))
+                INSERT INTO text_records_rows (id, title, content, source, language, word_count, created_at, updated_at)
+                VALUES (:id, :title, :content, :source, :language, 0, DATEADD(hour, 9, SYSUTCDATETIME()), DATEADD(hour, 9, SYSUTCDATETIME()))
             """), {
                 "id": record_id,
                 "title": row["title"],
                 "content": row["content"],
                 "source": row["source"],
+                "language": row["language"],
             })
             inserted += 1
 
@@ -1430,9 +1545,11 @@ def upload_texts_bulk():
 @app.route('/upload_words', methods=['POST'])
 def upload_words():
     try:
-        data = request.get_json()
+        ensure_text_language_column()
+        data = request.get_json() or {}
         text_id = (data.get('text_id') or '').strip()
         raw_words = data.get('words', [])
+        word_language_fallback = normalize_language_value(data.get('language'))
 
         # 프론트 입력 변형에 대비해 문자열 정규화
         words = []
@@ -1498,10 +1615,16 @@ def upload_words():
             id_params = {f"tid{i}": tid for i, tid in enumerate(target_ids)}
             placeholders = ', '.join([f":tid{i}" for i in range(len(target_ids))])
             title_rows = db.session.execute(
-                text(f"SELECT id, title FROM text_records_rows WHERE id IN ({placeholders})"),
+                text(f"SELECT id, title, language FROM text_records_rows WHERE id IN ({placeholders})"),
                 id_params
             ).fetchall()
-            text_meta = {r.id: (r.title or "(제목 없음)") for r in title_rows}
+            text_meta = {
+                r.id: {
+                    "title": (r.title or "(제목 없음)"),
+                    "language": normalize_language_value(getattr(r, 'language', None) or 'english'),
+                }
+                for r in title_rows
+            }
 
         # 없는 본문은 자동 생성
         now = now_kst()
@@ -1520,17 +1643,18 @@ def upload_words():
 
             db.session.execute(text("""
                 INSERT INTO text_records_rows
-                    (id, title, content, source, word_count, created_at, updated_at)
+                    (id, title, content, source, language, word_count, created_at, updated_at)
                 VALUES
-                    (:id, :title, :content, :source, 0, :now, :now)
+                    (:id, :title, :content, :source, :language, 0, :now, :now)
             """), {
                 "id": tid,
                 "title": default_title,
                 "content": default_content,
                 "source": default_source,
+                "language": word_language_fallback,
                 "now": now,
             })
-            text_meta[tid] = default_title
+            text_meta[tid] = {"title": default_title, "language": word_language_fallback}
 
         # ✅ 현재 가장 큰 id 값 가져오기
         last_id_query = text("SELECT MAX(CAST(id AS INT)) AS max_id FROM words_rows")
@@ -1542,13 +1666,15 @@ def upload_words():
         for w in words:
             current_max_id += 1  # +1 증가
             target_text_id = w.get("target_text_id", 'BULK')
-            text_title = text_meta.get(target_text_id, "(제목 없음)")
+            text_info = text_meta.get(target_text_id, {})
+            text_title = text_info.get("title", "(제목 없음)")
+            word_language = normalize_language_value(text_info.get("language") or word_language_fallback)
             insert_query = text("""
                 INSERT INTO words_rows
-                    (id, word, meaning, is_learned, text_id, text_title,
+                    (id, word, meaning, is_learned, text_id, text_title, language,
                      added_at, created_at, updated_at, sentence, exam_korean)
                 VALUES
-                    (:id, :word, :meaning, :is_learned, :text_id, :text_title,
+                    (:id, :word, :meaning, :is_learned, :text_id, :text_title, :language,
                      :now, :now, :now, :example, :exam_korean)
             """)
             db.session.execute(insert_query, {
@@ -1558,6 +1684,7 @@ def upload_words():
                 "is_learned": w.get("is_learned", 0),
                 "text_id": target_text_id,
                 "text_title": text_title,
+                "language": word_language,
                 "now": now,
                 "example": w.get("example", ""),
                 "exam_korean": w.get("exam_korean", "")
@@ -2832,4 +2959,4 @@ def chinese_test():
 
 # ✅ 서버 실행
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)

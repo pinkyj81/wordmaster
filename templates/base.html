@@ -194,8 +194,15 @@
         <label class="block text-sm font-semibold text-gray-700 mb-1">출처 (선택사항)</label>
         <input id="uploadSource" class="w-full border rounded-lg p-2 mb-4" placeholder="예: BBC News, 교과서 등">
 
+        <label class="block text-sm font-semibold text-gray-700 mb-1">언어 설정</label>
+        <select id="uploadLanguage" class="w-full border rounded-lg p-2 mb-4">
+          <option value="english">영어</option>
+          <option value="japanese">일본어</option>
+          <option value="chinese">중국어</option>
+        </select>
+
         <label class="block text-sm font-semibold text-gray-700 mb-1">본문 내용 *</label>
-        <textarea id="uploadContent" rows="8" class="w-full border rounded-lg p-3 mb-6" placeholder="영어 본문을 입력하거나 붙여넣기 하세요..."></textarea>
+        <textarea id="uploadContent" rows="8" class="w-full border rounded-lg p-3 mb-6" placeholder="본문을 입력하거나 붙여넣기 하세요..."></textarea>
 
         <div class="flex justify-end space-x-3">
           <button onclick="closeUploadModal()" class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400">취소</button>
@@ -215,9 +222,13 @@
 
       <!-- ✅ 단어 업로드 탭 -->
 <div id="wordUploadTab" class="hidden">
+  <label class="block text-sm font-semibold text-gray-700 mb-1">출처 선택</label>
+  <select id="wordSourceSelect" class="w-full border rounded-lg p-2 mb-4" onchange="loadWordTextOptionsBySource()">
+    <option value="">출처를 선택하세요</option>
+  </select>
+
   <label class="block text-sm font-semibold text-gray-700 mb-1">본문 선택</label>
   <select id="wordTextSelect" class="w-full border rounded-lg p-2 mb-4">
-    <option value="AUTO_BULK" selected>본문 선택 없이 대량등록 (엑셀 복붙)</option>
     <option value="">본문을 선택하세요</option>
   </select>
 
@@ -283,8 +294,8 @@
         wordTab.classList.remove('hidden');
         btnWord.classList.add('text-blue-600', 'border-b-2', 'border-blue-600');
         btnText.classList.remove('text-blue-600', 'border-b-2', 'border-blue-600');
-        // 단어 탭으로 전환시 본문목록 로드
-        loadTextOptionsForBaseModal();
+        // 단어 탭으로 전환시 출처/본문 목록 로드
+        loadWordUploadSourceOptions();
       }
     }
 
@@ -299,24 +310,51 @@
       modal.classList.add('hidden');
     }
 
-    // ✅ 본문 목록 로드 (base.html용)
-    function loadTextOptionsForBaseModal() {
+    // ✅ 단어 업로드용 출처 목록 로드
+    function loadWordUploadSourceOptions() {
+      const sourceSelect = document.getElementById('wordSourceSelect');
+      const textSelect = document.getElementById('wordTextSelect');
+      sourceSelect.innerHTML = '<option value="">출처를 선택하세요</option>';
+      textSelect.innerHTML = '<option value="">본문을 선택하세요</option>';
+
+      fetch('/get_sources')
+        .then(res => res.json())
+        .then(sources => {
+          sources.forEach(src => {
+            const option = document.createElement('option');
+            option.value = src.source;
+            option.textContent = src.source;
+            sourceSelect.appendChild(option);
+          });
+        })
+        .catch(err => {
+          console.error('출처 목록 로드 실패:', err);
+        });
+    }
+
+    // ✅ 출처 기준 본문 목록 로드 (base.html용)
+    function loadWordTextOptionsBySource() {
+      const source = document.getElementById('wordSourceSelect').value;
       const select = document.getElementById('wordTextSelect');
-      select.innerHTML = '<option value="AUTO_BULK" selected>본문 선택 없이 대량등록 (엑셀 복붙)</option><option value="">본문을 선택하세요</option>';
+      select.innerHTML = '<option value="">본문을 선택하세요</option>';
+
+      if (!source) return;
       
       fetch('/get_text_titles')
         .then(res => res.json())
         .then(texts => {
-          if (texts.length === 0) {
+          const filteredTexts = texts.filter(text => text.source === source);
+
+          if (filteredTexts.length === 0) {
             const option = document.createElement('option');
             option.value = '';
-            option.textContent = '등록된 본문이 없습니다';
+            option.textContent = '해당 출처의 본문이 없습니다';
             option.disabled = true;
             select.appendChild(option);
             return;
           }
           
-          texts.forEach(text => {
+          filteredTexts.forEach(text => {
             const option = document.createElement('option');
             option.value = text.id;
             // 출처 정보도 함께 표시
@@ -334,12 +372,13 @@
       const title = document.getElementById('uploadTitle').value.trim();
       const source = document.getElementById('uploadSource').value.trim();
       const content = document.getElementById('uploadContent').value.trim();
+      const language = document.getElementById('uploadLanguage').value || 'english';
       if (!title || !content) return alert('제목과 내용을 입력해주세요.');
 
       fetch('/upload_text', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, source, content })
+        body: JSON.stringify({ title, source, content, language })
       })
       .then(res => res.json())
       .then(() => {
@@ -378,6 +417,7 @@
 
     function submitBulkTexts() {
       const rawList = document.getElementById('bulkTextInput').value.trim();
+      const language = document.getElementById('uploadLanguage').value || 'english';
       if (!rawList) return alert('본문 대량등록 목록을 입력해주세요.');
 
       const texts = parseBulkTextLines(rawList);
@@ -386,7 +426,7 @@
       fetch('/upload_texts_bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ texts })
+        body: JSON.stringify({ texts, language })
       })
       .then(res => res.json())
       .then(data => {
@@ -497,6 +537,7 @@
       const rawList = document.getElementById('bulkWordInput').value.trim();
 
       if (!rawList) return alert('단어 목록을 입력해주세요.');
+      if (!selectedTextId) return alert('출처를 선택한 뒤 본문을 선택해주세요.');
 
       const parsed = parseBulkWordLines(rawList, selectedTextId);
       if (parsed.error) return alert(parsed.error);
@@ -504,14 +545,10 @@
       const words = parsed.words;
       if (words.length === 0) return alert('올바른 형식으로 단어를 입력해주세요.');
 
-      const finalTextId = (selectedTextId && selectedTextId !== 'AUTO_BULK')
-        ? selectedTextId
-        : 'AUTO_BULK';
-
       fetch('/upload_words', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text_id: finalTextId, words })
+        body: JSON.stringify({ text_id: selectedTextId, words })
       })
       .then(res => res.json())
       .then(() => {
