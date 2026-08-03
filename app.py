@@ -4,10 +4,13 @@ from sqlalchemy import text
 from datetime import datetime, timezone, timedelta
 from gtts import gTTS
 from functools import wraps
+from urllib.parse import quote_plus
 import io
 import uuid
 import json
 import os
+import re
+import pyodbc
 
 # 한국 시간대 설정 (UTC+9)
 KST = timezone(timedelta(hours=9))
@@ -55,11 +58,43 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)  # 세션 암호화 키
 
 # ✅ SQL Server 연결 (SSL 인증서 허용)
-app.config['SQLALCHEMY_DATABASE_URI'] = (
-    f"mssql+pyodbc://pinkyj81:zoskek38!!@ms1901.gabiadb.com/yujincast"
-    "?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=yes"
+def _resolve_db_driver(configured_driver: str) -> str:
+    driver = (configured_driver or "").strip()
+    if driver:
+        return driver
+
+    installed = [d for d in pyodbc.drivers() if "SQL Server" in d]
+    for preferred in ("ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server"):
+        if preferred in installed:
+            return preferred
+
+    if installed:
+        return installed[-1]
+
+    return "ODBC Driver 18 for SQL Server"
+
+
+DB_SERVER = os.getenv("DB_SERVER", "ms1901.gabiadb.com").strip()
+DB_NAME = os.getenv("DB_NAME", "yujincast").strip()
+DB_USER = os.getenv("DB_USER", "pinkyj81").strip()
+DB_PASSWORD = os.getenv("DB_PASSWORD", "zoskek38!!").strip()
+DB_DRIVER = _resolve_db_driver(os.getenv("DB_DRIVER", ""))
+
+odbc_connection_string = (
+    f"DRIVER={{{DB_DRIVER}}};"
+    f"SERVER={DB_SERVER};"
+    f"DATABASE={DB_NAME};"
+    f"UID={DB_USER};"
+    f"PWD={DB_PASSWORD};"
+    "Encrypt=yes;"
+    "TrustServerCertificate=yes;"
 )
+
+app.config['SQLALCHEMY_DATABASE_URI'] = "mssql+pyodbc:///?odbc_connect=" + quote_plus(odbc_connection_string)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    "pool_pre_ping": True,
+}
 db = SQLAlchemy(app)
 
 # ✅ 사용자 목록 (간단한 구현)
@@ -67,7 +102,6 @@ USERS = [
     {"id": "user1", "name": "박영진", "user_id": "박영진", "is_admin": True},
     {"id": "user2", "name": "권혁재", "user_id": "권혁재", "is_admin": False},
     {"id": "user3", "name": "권유현", "user_id": "권유현", "is_admin": False},
-    {"id": "user4", "name": "GUEST", "user_id": "GUEST", "is_admin": False},
 ]
 
 # 로그인 드롭다운에 표시할 DB 사용자 최대 수
@@ -181,19 +215,9 @@ class WordUser(db.Model):
 # ✅ 로그인 페이지
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # 정적 사용자 + DB 최근 사용자 목록을 합쳐 로그인 선택지로 사용
+    # 고정 사용자 목록만 로그인 선택지로 사용
     static_names = [u['name'] for u in USERS if u.get('name')]
-
-    # 사용자가 너무 많아지는 문제를 줄이기 위해 최근 등록 사용자만 제한적으로 노출
-    registered_users_query = text(f"""
-        SELECT TOP {LOGIN_USER_OPTION_LIMIT} user_name
-        FROM word_users
-        WHERE user_name IS NOT NULL AND LTRIM(RTRIM(user_name)) <> ''
-        GROUP BY user_name
-        ORDER BY MAX(id) DESC
-    """)
-    registered_names = [r.user_name for r in db.session.execute(registered_users_query).fetchall() if r.user_name]
-    available_names = sorted(set(static_names + registered_names), key=lambda value: value.lower())
+    available_names = sorted(set(static_names), key=lambda value: value.lower())
 
     if request.method == 'POST':
         selected_name = (request.form.get('user_id') or '').strip()
@@ -973,6 +997,547 @@ def math_quiz():
     )
 
 
+@app.route('/japanese/register')
+@login_required
+def japanese_register():
+    ensure_japanese_study_table()
+
+    success = (request.args.get('success') or '').strip()
+    error = (request.args.get('error') or '').strip()
+    draft_title = (request.args.get('title') or '').strip()
+    draft_text = ''
+
+    rows = db.session.execute(text("""
+        SELECT TOP 100
+            day_no,
+            day_code,
+            study_title,
+            category,
+            japanese_text,
+            hiragana,
+            korean_meaning,
+            natural_translation,
+            key_words,
+            grammar_point,
+            created_at,
+            updated_at
+        FROM japanese_daily_study_rows
+        ORDER BY day_no ASC
+    """)).fetchall()
+
+    default_title = _get_next_study_title()
+
+    return render_template(
+        'japanese_register.html',
+        rows=rows,
+        success=success,
+        error=error,
+        draft_title=draft_title,
+        draft_text=draft_text,
+        parsed_rows=[],
+        default_title=default_title,
+    )
+
+
+def _day_code(day_no: int) -> str:
+    return f"DAY {int(day_no):02d}"
+
+
+def _get_next_study_title() -> str:
+    titles = db.session.execute(text("""
+        SELECT DISTINCT study_title
+        FROM japanese_daily_study_rows
+        WHERE study_title IS NOT NULL AND LTRIM(RTRIM(study_title)) <> ''
+    """)).fetchall()
+
+    max_no = 0
+    for row in titles:
+        title = str(getattr(row, 'study_title', '') or '').strip()
+        match = re.search(r"(?i)^\s*day\s*(\d+)\s*$", title)
+        if not match:
+            continue
+        try:
+            value = int(match.group(1))
+        except Exception:
+            continue
+        if value > max_no:
+            max_no = value
+
+    if max_no <= 0:
+        return "DAY 01"
+    return f"DAY {max_no + 1}"
+
+
+def ensure_japanese_study_table():
+    db.session.execute(text("""
+        IF OBJECT_ID('dbo.japanese_daily_study_rows', 'U') IS NULL
+        BEGIN
+            CREATE TABLE dbo.japanese_daily_study_rows (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                day_no INT NOT NULL,
+                day_code NVARCHAR(20) NOT NULL,
+                study_title NVARCHAR(200) NULL,
+                category NVARCHAR(50) NOT NULL,
+                japanese_text NVARCHAR(MAX) NOT NULL,
+                hiragana NVARCHAR(MAX) NULL,
+                korean_meaning NVARCHAR(MAX) NULL,
+                natural_translation NVARCHAR(MAX) NULL,
+                key_words NVARCHAR(500) NULL,
+                grammar_point NVARCHAR(500) NULL,
+                created_by NVARCHAR(100) NULL,
+                updated_by NVARCHAR(100) NULL,
+                created_at DATETIME2 NOT NULL DEFAULT DATEADD(hour, 9, SYSUTCDATETIME()),
+                updated_at DATETIME2 NULL
+            );
+        END
+
+        IF COL_LENGTH('dbo.japanese_daily_study_rows', 'study_title') IS NULL
+        BEGIN
+            ALTER TABLE dbo.japanese_daily_study_rows
+            ADD study_title NVARCHAR(200) NULL;
+        END
+
+        IF EXISTS (
+            SELECT 1
+            FROM sys.indexes
+            WHERE name = 'UX_japanese_daily_study_rows_day_no'
+              AND object_id = OBJECT_ID('dbo.japanese_daily_study_rows')
+        )
+        BEGIN
+            DROP INDEX UX_japanese_daily_study_rows_day_no ON dbo.japanese_daily_study_rows;
+        END
+
+        IF NOT EXISTS (
+            SELECT 1
+            FROM sys.indexes
+            WHERE name = 'UX_japanese_daily_study_rows_title_day_no'
+              AND object_id = OBJECT_ID('dbo.japanese_daily_study_rows')
+        )
+        BEGIN
+            CREATE UNIQUE INDEX UX_japanese_daily_study_rows_title_day_no
+            ON dbo.japanese_daily_study_rows(study_title, day_no)
+            WHERE study_title IS NOT NULL;
+        END
+    """))
+    db.session.commit()
+
+
+def _parse_tabbed_rows(raw_text: str) -> list[dict[str, Any]]:
+    parsed: list[dict[str, Any]] = []
+
+    for line in raw_text.splitlines():
+        line_text = str(line or "").replace("\u00a0", " ").replace("\u200b", "").strip()
+        if not line_text:
+            continue
+
+        # Markdown table separator line (e.g. |---|---|) is ignored.
+        if re.fullmatch(r"\|?\s*:?[-]{2,}:?\s*(\|\s*:?[-]{2,}:?\s*)+\|?", line_text):
+            continue
+
+        # 1) Real TSV tabs
+        # 2) Escaped tabs copied as literal "\\t"
+        # 3) Markdown table row with "|"
+        if "\t" in line_text:
+            parts = [part.strip() for part in re.split(r"\t+", line_text) if part.strip()]
+        elif "\\t" in line_text:
+            parts = [part.strip() for part in re.split(r"(?:\\t)+", line_text) if part.strip()]
+        elif "|" in line_text:
+            parts = [part.strip() for part in line_text.strip('|').split('|') if part.strip()]
+        else:
+            parts = []
+
+        if len(parts) < 8:
+            continue
+
+        header_first = re.sub(r"\s+", "", parts[0]).lower()
+        if header_first in {"no", "번호"}:
+            continue
+
+        day_match = re.match(r"^(\d{1,3})$", parts[0])
+        if not day_match:
+            continue
+
+        day_no = int(day_match.group(1))
+        parsed.append({
+            "day_no": day_no,
+            "day_code": _day_code(day_no),
+            "category": parts[1],
+            "japanese_text": parts[2],
+            "hiragana": parts[3],
+            "korean_meaning": parts[4],
+            "natural_translation": parts[5],
+            "key_words": parts[6],
+            "grammar_point": parts[7],
+        })
+
+    return parsed
+
+
+def _parse_dense_rows(raw_text: str) -> list[dict[str, Any]]:
+    pattern = re.compile(
+        r"(?P<day_no>\d{1,3})\s*(?P<category>일상|직장|비즈니스|제조업)\s*"
+        r"(?P<japanese_text>.+?。)\s*"
+        r"(?P<hiragana>[ぁ-んァ-ンー・\s]+。)\s*"
+        r"(?P<korean_meaning>[^.]+\.)\s*"
+        r"(?P<natural_translation>[^.]+\.)\s*"
+        r"(?P<key_words>.+?)\s*"
+        r"(?P<grammar_point>\*\*.+?)(?=(?:\d{1,3}\s*(?:일상|직장|비즈니스|제조업))|$)",
+        flags=re.DOTALL,
+    )
+
+    parsed: list[dict[str, Any]] = []
+    for m in pattern.finditer(raw_text):
+        day_no = int(m.group('day_no'))
+        parsed.append({
+            "day_no": day_no,
+            "day_code": _day_code(day_no),
+            "category": (m.group('category') or '').strip(),
+            "japanese_text": (m.group('japanese_text') or '').strip(),
+            "hiragana": (m.group('hiragana') or '').strip(),
+            "korean_meaning": (m.group('korean_meaning') or '').strip(),
+            "natural_translation": (m.group('natural_translation') or '').strip(),
+            "key_words": (m.group('key_words') or '').strip(),
+            "grammar_point": (m.group('grammar_point') or '').strip(),
+        })
+
+    return parsed
+
+
+def parse_japanese_study_rows(raw_text: str) -> list[dict[str, Any]]:
+    text_blob = str(raw_text or '').strip()
+    if not text_blob:
+        return []
+
+    text_blob = text_blob.replace('\r\n', '\n').replace('\r', '\n')
+
+    tabbed = _parse_tabbed_rows(text_blob)
+    parsed = tabbed if tabbed else _parse_dense_rows(text_blob)
+
+    by_day: dict[int, dict[str, Any]] = {}
+    for row in parsed:
+        day_no = int(row['day_no'])
+        by_day[day_no] = row
+
+    return [by_day[day_no] for day_no in sorted(by_day.keys())]
+
+
+@app.route('/japanese/register/parse', methods=['POST'])
+@login_required
+def japanese_register_parse():
+    ensure_japanese_study_table()
+
+    study_title = (request.form.get('study_title') or '').strip()
+    bulk_text = (request.form.get('bulk_text') or '').strip()
+
+    rows = db.session.execute(text("""
+        SELECT TOP 100
+            day_no,
+            day_code,
+            study_title,
+            category,
+            japanese_text,
+            hiragana,
+            korean_meaning,
+            natural_translation,
+            key_words,
+            grammar_point,
+            created_at,
+            updated_at
+        FROM japanese_daily_study_rows
+        ORDER BY day_no ASC
+    """)).fetchall()
+
+    default_title = _get_next_study_title()
+
+    if not study_title:
+        return render_template(
+            'japanese_register.html',
+            rows=rows,
+            success='',
+            error='제목을 입력하세요.',
+            draft_title=study_title,
+            draft_text=bulk_text,
+            parsed_rows=[],
+            default_title=default_title,
+        )
+
+    if not bulk_text:
+        return render_template(
+            'japanese_register.html',
+            rows=rows,
+            success='',
+            error='붙여넣을 내용을 입력하세요.',
+            draft_title=study_title,
+            draft_text=bulk_text,
+            parsed_rows=[],
+            default_title=default_title,
+        )
+
+    parsed_rows = parse_japanese_study_rows(bulk_text)
+    if not parsed_rows:
+        return render_template(
+            'japanese_register.html',
+            rows=rows,
+            success='',
+            error='형식을 해석하지 못했습니다. 표 형태(탭 구분)로 다시 붙여 넣어 주세요.',
+            draft_title=study_title,
+            draft_text=bulk_text,
+            parsed_rows=[],
+            default_title=default_title,
+        )
+
+    return render_template(
+        'japanese_register.html',
+        rows=rows,
+        success=f'파싱 완료: {len(parsed_rows)}건 확인됨',
+        error='',
+        draft_title=study_title,
+        draft_text=bulk_text,
+        parsed_rows=parsed_rows,
+        default_title=default_title,
+    )
+
+
+@app.route('/japanese/register/import', methods=['POST'])
+@login_required
+def japanese_register_import():
+    ensure_japanese_study_table()
+
+    study_title = (request.form.get('study_title') or '').strip()
+    bulk_text = (request.form.get('bulk_text') or '').strip()
+    parsed_json = (request.form.get('parsed_json') or '').strip()
+    if not study_title:
+        return redirect(url_for('japanese_register', error='제목을 입력하세요.'))
+
+    rows: list[dict[str, Any]] = []
+    if parsed_json:
+        try:
+            loaded = json.loads(parsed_json)
+            if isinstance(loaded, list):
+                rows = loaded
+        except Exception:
+            rows = []
+
+    if not rows:
+        if not bulk_text:
+            return redirect(url_for('japanese_register', error='붙여넣을 내용을 입력하세요.'))
+        rows = parse_japanese_study_rows(bulk_text)
+
+    if not rows:
+        return redirect(url_for('japanese_register', error='파싱된 데이터가 없습니다. 먼저 파싱하기를 눌러 확인해 주세요.'))
+
+    user_name = session.get('db_user_id', session.get('user_name', 'Unknown'))
+
+    try:
+        for row in rows:
+            db.session.execute(text("""
+                IF EXISTS (
+                    SELECT 1
+                    FROM japanese_daily_study_rows
+                    WHERE study_title = :study_title
+                      AND day_no = :day_no
+                )
+                BEGIN
+                    UPDATE japanese_daily_study_rows
+                    SET
+                        day_code = :day_code,
+                        study_title = :study_title,
+                        category = :category,
+                        japanese_text = :japanese_text,
+                        hiragana = :hiragana,
+                        korean_meaning = :korean_meaning,
+                        natural_translation = :natural_translation,
+                        key_words = :key_words,
+                        grammar_point = :grammar_point,
+                        updated_by = :updated_by,
+                        updated_at = DATEADD(hour, 9, SYSUTCDATETIME())
+                                        WHERE study_title = :study_title
+                                            AND day_no = :day_no
+                END
+                ELSE
+                BEGIN
+                    INSERT INTO japanese_daily_study_rows (
+                        day_no,
+                        day_code,
+                        study_title,
+                        category,
+                        japanese_text,
+                        hiragana,
+                        korean_meaning,
+                        natural_translation,
+                        key_words,
+                        grammar_point,
+                        created_by
+                    ) VALUES (
+                        :day_no,
+                        :day_code,
+                        :study_title,
+                        :category,
+                        :japanese_text,
+                        :hiragana,
+                        :korean_meaning,
+                        :natural_translation,
+                        :key_words,
+                        :grammar_point,
+                        :created_by
+                    )
+                END
+            """), {
+                "day_no": row["day_no"],
+                "day_code": row["day_code"],
+                "study_title": study_title,
+                "category": row["category"],
+                "japanese_text": row["japanese_text"],
+                "hiragana": row["hiragana"],
+                "korean_meaning": row["korean_meaning"],
+                "natural_translation": row["natural_translation"],
+                "key_words": row["key_words"],
+                "grammar_point": row["grammar_point"],
+                "created_by": user_name,
+                "updated_by": user_name,
+            })
+
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return redirect(url_for('japanese_register', error=f'저장 중 오류: {exc}'))
+
+    return redirect(url_for('japanese_register', success=f'{len(rows)}건 저장 완료'))
+
+
+@app.route('/japanese/daily-study')
+@login_required
+def japanese_daily_study():
+    ensure_japanese_study_table()
+
+    study_title = (request.args.get('study_title') or '').strip()
+    category = (request.args.get('category') or '').strip()
+    keyword = (request.args.get('q') or '').strip()
+
+    where_parts = ["1=1"]
+    params: dict[str, Any] = {}
+    if study_title:
+        where_parts.append("study_title = :study_title")
+        params["study_title"] = study_title
+    if category:
+        where_parts.append("category = :category")
+        params["category"] = category
+    if keyword:
+        where_parts.append("(" +
+            "japanese_text LIKE :kw OR hiragana LIKE :kw OR korean_meaning LIKE :kw OR natural_translation LIKE :kw OR key_words LIKE :kw OR grammar_point LIKE :kw OR study_title LIKE :kw OR day_code LIKE :kw OR REPLACE(day_code, ' ', '') LIKE :kw_nospace OR CAST(day_no AS NVARCHAR(20)) LIKE :kw" +
+        ")")
+        params["kw"] = f"%{keyword}%"
+        params["kw_nospace"] = f"%{keyword.replace(' ', '')}%"
+
+    rows = db.session.execute(text(f"""
+        SELECT
+            day_no,
+            day_code,
+            study_title,
+            category,
+            japanese_text,
+            hiragana,
+            korean_meaning,
+            natural_translation,
+            key_words,
+            grammar_point
+        FROM japanese_daily_study_rows
+        WHERE {' AND '.join(where_parts)}
+        ORDER BY day_no ASC
+    """), params).fetchall()
+
+    title_options = db.session.execute(text("""
+        SELECT DISTINCT study_title
+        FROM japanese_daily_study_rows
+        WHERE study_title IS NOT NULL AND LTRIM(RTRIM(study_title)) <> ''
+        ORDER BY study_title ASC
+    """)).fetchall()
+
+    categories = db.session.execute(text("""
+        SELECT DISTINCT category
+        FROM japanese_daily_study_rows
+        WHERE category IS NOT NULL AND LTRIM(RTRIM(category)) <> ''
+        ORDER BY category ASC
+    """)).fetchall()
+
+    return render_template(
+        'japanese_daily_study.html',
+        rows=rows,
+        title_options=[t.study_title for t in title_options if getattr(t, 'study_title', None)],
+        selected_title=study_title,
+        page_title_text=(rows[0].study_title if rows and getattr(rows[0], 'study_title', None) else study_title),
+        categories=[c.category for c in categories if getattr(c, 'category', None)],
+        selected_category=category,
+        keyword=keyword,
+    )
+
+
+@app.route('/japanese/mobile')
+@login_required
+def japanese_mobile():
+    ensure_japanese_study_table()
+    # 챕터(study_title) 목록과 각 챕터의 문장 수를 반환
+    chapters = db.session.execute(text("""
+        SELECT study_title,
+               COUNT(*) AS sentence_count
+        FROM japanese_daily_study_rows
+        WHERE study_title IS NOT NULL AND LTRIM(RTRIM(study_title)) <> ''
+        GROUP BY study_title
+        ORDER BY study_title ASC
+    """)).fetchall()
+
+    return render_template(
+        'japanese_mobile.html',
+        chapters=chapters,
+    )
+
+
+@app.route('/japanese/mobile/chapter/<path:study_title>')
+@login_required
+def japanese_mobile_chapter(study_title):
+    ensure_japanese_study_table()
+
+    rows = db.session.execute(text("""
+        SELECT day_no, day_code, study_title, category,
+               japanese_text, hiragana, korean_meaning,
+               natural_translation, key_words, grammar_point
+        FROM japanese_daily_study_rows
+        WHERE study_title = :title
+        ORDER BY day_no ASC
+    """), {"title": study_title}).fetchall()
+
+    # 이전/다음 챕터 (study_title 순서 기준)
+    all_titles = db.session.execute(text("""
+        SELECT study_title FROM japanese_daily_study_rows
+        WHERE study_title IS NOT NULL AND LTRIM(RTRIM(study_title)) <> ''
+        GROUP BY study_title
+        ORDER BY study_title ASC
+    """)).fetchall()
+    title_list = [t.study_title for t in all_titles]
+    idx = title_list.index(study_title) if study_title in title_list else -1
+    prev_title = title_list[idx - 1] if idx > 0 else None
+    next_title = title_list[idx + 1] if idx >= 0 and idx < len(title_list) - 1 else None
+
+    sentences = [
+        {
+            "jp": r.japanese_text or "",
+            "hira": r.hiragana or "",
+            "meaning": r.korean_meaning or "",
+        }
+        for r in rows
+    ]
+
+    return render_template(
+        'japanese_mobile_day.html',
+        rows=rows,
+        sentences=sentences,
+        day_code=study_title,
+        study_title=study_title,
+        prev_title=prev_title,
+        next_title=next_title,
+    )
+
+
 # ✅ 단어 찾기 페이지
 @app.route('/word_search')
 @login_required
@@ -1290,6 +1855,23 @@ def tts(word):
 def tts_text():
     text_value = (request.args.get('text') or '').strip()
     language_value = (request.args.get('lang') or 'english').strip()
+
+    if not text_value:
+        return jsonify({'error': 'text is required'}), 400
+
+    lang, tld = resolve_gtts_language(language_value)
+    tts = gTTS(text_value, lang=lang, tld=tld)
+    mp3_fp = io.BytesIO()
+    tts.write_to_fp(mp3_fp)
+    mp3_fp.seek(0)
+    return send_file(mp3_fp, mimetype='audio/mpeg')
+
+
+@app.route('/tts_text_post', methods=['POST'])
+def tts_text_post():
+    payload = request.get_json(silent=True) or {}
+    text_value = str(payload.get('text') or '').strip()
+    language_value = str(payload.get('lang') or 'english').strip()
 
     if not text_value:
         return jsonify({'error': 'text is required'}), 400

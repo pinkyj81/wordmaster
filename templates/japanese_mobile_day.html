@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  body { background: #f0f0ec; }
+
+  .fc-wrap {
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 12px 24px;
+    box-sizing: border-box;
+  }
+
+  /* 상단 헤더 */
+  .fc-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .fc-title { font-size: 13px; color: #888; font-weight: 600; }
+  .fc-counter { font-size: 13px; color: #888; }
+
+  /* 카드 영역 */
+  .fc-card {
+    flex: 1;
+    background: #fff;
+    border-radius: 20px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.10);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 28px;
+    text-align: center;
+    cursor: pointer;
+    min-height: 280px;
+    user-select: none;
+  }
+  .fc-card:active { opacity: 0.92; }
+
+  .fc-jp {
+    font-size: 24px;
+    font-weight: 800;
+    color: #1a1a2e;
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+  .fc-hiragana {
+    font-size: 14px;
+    color: #6366f1;
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+  .fc-meaning {
+    font-size: 18px;
+    color: #374151;
+    font-weight: 600;
+  }
+
+  /* 진행 표시 */
+  .fc-progress {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    margin: 16px 0;
+  }
+  .fc-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #d1d5db;
+    transition: background 0.2s;
+  }
+  .fc-dot.active { background: #6366f1; width: 20px; border-radius: 4px; }
+
+  /* 오디오 플레이어 */
+  #ttsPlayer { width: 100%; border-radius: 8px; margin-bottom: 8px; }
+  #ttsStatus { font-size: 11px; color: #6366f1; min-height: 14px; text-align: center; margin-bottom: 8px; }
+
+  /* 하단 버튼 */
+  .fc-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .fc-btn {
+    flex: 1;
+    padding: 16px 8px;
+    border-radius: 14px;
+    background: #22c55e;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    text-align: center;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+  }
+  .fc-btn:active { opacity: 0.85; }
+  .fc-btn.gray { background: #9ca3af; }
+  .fc-btn.disabled { background: #e5e7eb; color: #9ca3af; pointer-events: none; cursor: default; }
+</style>
+
+<div class="fc-wrap">
+
+  <div class="fc-header">
+    <span class="fc-title">{{ study_title }}</span>
+    <span class="fc-counter" id="fcCounter">1 / {{ rows|length }}</span>
+  </div>
+
+  <!-- 카드 (일본어 클릭 → 발음) -->
+  <div class="fc-card" id="fcCard" onclick="onCardClick()">
+    <div class="fc-jp" id="fcJp"></div>
+    <div class="fc-hiragana" id="fcHira"></div>
+    <div class="fc-meaning" id="fcMeaning"></div>
+  </div>
+
+  <!-- 진행 점 (최대 10개) -->
+  <div class="fc-progress" id="fcDots"></div>
+
+  <audio id="ttsPlayer" controls preload="none"></audio>
+  <div id="ttsStatus"></div>
+
+  <!-- 이전 / 다음 (문장 이동) + 챕터 이동 -->
+  <div class="fc-buttons">
+    <button class="fc-btn" onclick="moveSentence(-1)">이전</button>
+    <button class="fc-btn" onclick="moveSentence(1)">다음</button>
+  </div>
+
+</div>
+
+<script>
+  const sentences = {{ sentences | tojson }};
+  let idx = 0;
+  let ttsObjectUrl = null;
+  const ttsPlayer = document.getElementById("ttsPlayer");
+  const ttsStatus = document.getElementById("ttsStatus");
+
+  function render() {
+    const s = sentences[idx];
+    document.getElementById("fcJp").textContent      = s.jp;
+    document.getElementById("fcHira").textContent    = s.hira;
+    document.getElementById("fcMeaning").textContent = s.meaning;
+    document.getElementById("fcCounter").textContent = `${idx + 1} / ${sentences.length}`;
+    renderDots();
+  }
+
+  function renderDots() {
+    const container = document.getElementById("fcDots");
+    const show = Math.min(sentences.length, 10);
+    const startIdx = sentences.length <= 10 ? 0 : Math.max(0, idx - 4);
+    container.innerHTML = "";
+    for (let i = startIdx; i < startIdx + show && i < sentences.length; i++) {
+      const d = document.createElement("div");
+      d.className = "fc-dot" + (i === idx ? " active" : "");
+      container.appendChild(d);
+    }
+  }
+
+  function moveSentence(dir) {
+    const next = idx + dir;
+    if (next < 0 || next >= sentences.length) return;
+    idx = next;
+    render();
+  }
+
+  function onCardClick() {
+    playTts(sentences[idx].jp);
+  }
+
+  async function playTts(text) {
+    if (!text) return;
+    ttsStatus.textContent = "음성 생성 중...";
+    try {
+      const res = await fetch("/tts_text_post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, lang: "japanese" }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (ttsObjectUrl) URL.revokeObjectURL(ttsObjectUrl);
+      const blob = await res.blob();
+      ttsObjectUrl = URL.createObjectURL(blob);
+      ttsPlayer.src = ttsObjectUrl;
+      ttsPlayer.load();
+      await ttsPlayer.play();
+      ttsStatus.textContent = "";
+    } catch (err) {
+      const url = `/tts_text?lang=japanese&text=${encodeURIComponent(text)}&t=${Date.now()}`;
+      ttsPlayer.src = url;
+      ttsPlayer.load();
+      ttsPlayer.play().catch(() => { ttsStatus.textContent = "재생 실패: 아래 플레이어 이용"; });
+    }
+  }
+
+  ttsPlayer.addEventListener("ended", () => { ttsStatus.textContent = ""; });
+  ttsPlayer.addEventListener("error", () => { ttsStatus.textContent = "오디오 에러"; });
+
+  render();
+</script>
+{% endblock %}

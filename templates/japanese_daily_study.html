@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .jp-cell {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .jp-clickable {
+    cursor: pointer;
+  }
+
+  .jp-clickable:hover {
+    text-decoration: underline;
+    text-decoration-color: #818cf8;
+  }
+
+</style>
+
+<div class="w-full">
+  <h2 class="text-2xl font-bold text-gray-800 mb-2">{{ page_title_text or '일본어 일일학습 페이지' }}</h2>
+  <p class="text-sm text-gray-500 mb-6">DAY 01 형식으로 정렬된 학습 문장을 확인하고 복습하세요.</p>
+
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-5">
+    <form class="flex flex-wrap items-center gap-3" method="get" action="{{ url_for('japanese_daily_study') }}">
+      <label class="text-sm text-gray-700">제목</label>
+      <select name="study_title" class="border rounded-lg px-3 py-2 text-sm min-w-[220px]">
+        <option value="">전체</option>
+        {% for title in title_options %}
+        <option value="{{ title }}" {% if selected_title == title %}selected{% endif %}>{{ title }}</option>
+        {% endfor %}
+      </select>
+
+      <label class="text-sm text-gray-700">분야</label>
+      <select name="category" class="border rounded-lg px-3 py-2 text-sm">
+        <option value="">전체</option>
+        {% for category in categories %}
+        <option value="{{ category }}" {% if selected_category == category %}selected{% endif %}>{{ category }}</option>
+        {% endfor %}
+      </select>
+
+      <input type="text" name="q" value="{{ keyword }}" class="border rounded-lg px-3 py-2 text-sm min-w-[280px]" placeholder="일본어/뜻/문법/DAY 29(DAY29, 29) 검색" />
+      <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">조회</button>
+      <button id="playAllBtn" type="button" class="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">전체재생</button>
+      <button id="stopAllBtn" type="button" class="px-4 py-2 rounded-lg bg-gray-600 text-white hover:bg-gray-700">중지</button>
+    </form>
+
+    <div class="mt-3 flex flex-col gap-2">
+      <p class="text-xs text-gray-500">듣기가 안 되면 아래 플레이어의 재생 버튼을 눌러주세요.</p>
+      <p id="jpTtsStatus" class="text-xs text-indigo-700"></p>
+      <audio id="jpTtsPlayer" controls preload="none" class="w-full"></audio>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    <table class="min-w-full text-sm">
+      <thead class="bg-gray-50 text-gray-700">
+        <tr>
+          <th class="px-4 py-3 text-left">제목</th>
+          <th class="px-4 py-3 text-left">분야</th>
+          <th class="px-4 py-3 text-left">일본어</th>
+          <th class="px-4 py-3 text-left">히라가나</th>
+          <th class="px-4 py-3 text-left">뜻</th>
+          <th class="px-4 py-3 text-left">자연스러운 해석</th>
+          <th class="px-4 py-3 text-left">핵심 단어</th>
+          <th class="px-4 py-3 text-left">문법 포인트</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if rows %}
+          {% for row in rows %}
+          <tr class="border-t align-top">
+            <td class="px-4 py-3">{{ row.study_title or '-' }}</td>
+            <td class="px-4 py-3">{{ row.category }}</td>
+            <td class="px-4 py-3">
+              <div class="jp-cell">
+                <span
+                  class="jp-clickable"
+                  data-jp-tts-text="{{ row.japanese_text|e }}"
+                  title="클릭해서 듣기"
+                >{{ row.japanese_text }}</span>
+              </div>
+            </td>
+            <td class="px-4 py-3">{{ row.hiragana }}</td>
+            <td class="px-4 py-3">{{ row.korean_meaning }}</td>
+            <td class="px-4 py-3">{{ row.natural_translation }}</td>
+            <td class="px-4 py-3">{{ row.key_words }}</td>
+            <td class="px-4 py-3">{{ row.grammar_point }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr class="border-t">
+            <td colspan="8" class="px-4 py-6 text-center text-gray-500">조회된 일본어 학습 데이터가 없습니다.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  let jpTtsObjectUrl = null;
+  let isPlayAllRunning = false;
+  const jpTtsPlayer = document.getElementById("jpTtsPlayer");
+  const jpTtsStatus = document.getElementById("jpTtsStatus");
+  const playAllBtn = document.getElementById("playAllBtn");
+  const stopAllBtn = document.getElementById("stopAllBtn");
+
+  function setJpTtsStatus(message) {
+    if (!jpTtsStatus) return;
+    jpTtsStatus.textContent = message || "";
+  }
+
+  function parseTtsTextFromElement(el) {
+    if (!el) return "";
+    const raw = el.getAttribute("data-jp-tts-text");
+    return raw ? String(raw) : "";
+  }
+
+  function buildJapaneseTtsUrl(textValue) {
+    const text = String(textValue || "").trim();
+    if (!text) return "";
+    return `/tts_text?lang=japanese&text=${encodeURIComponent(text)}&t=${Date.now()}`;
+  }
+
+  function setPlayerUrl(url) {
+    if (!jpTtsPlayer || !url) return;
+    jpTtsPlayer.src = url;
+    jpTtsPlayer.load();
+    jpTtsPlayer.currentTime = 0;
+    jpTtsPlayer.volume = 1;
+    jpTtsPlayer.muted = false;
+  }
+
+  function bindPlayerDebugEvents() {
+    if (!jpTtsPlayer) return;
+    jpTtsPlayer.addEventListener("canplay", () => {
+      setJpTtsStatus("오디오 준비 완료(canplay)");
+    });
+    jpTtsPlayer.addEventListener("playing", () => {
+      setJpTtsStatus("재생 중(playing)");
+    });
+    jpTtsPlayer.addEventListener("ended", () => {
+      setJpTtsStatus("재생 완료");
+    });
+    jpTtsPlayer.addEventListener("error", () => {
+      const code = jpTtsPlayer.error ? jpTtsPlayer.error.code : "-";
+      setJpTtsStatus(`오디오 에러(code=${code})`);
+    });
+  }
+
+  bindPlayerDebugEvents();
+
+  window.addEventListener("error", (event) => {
+    const msg = event && event.message ? event.message : "unknown";
+    setJpTtsStatus(`JS 에러: ${msg}`);
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event && event.reason ? String(event.reason) : "unknown";
+    setJpTtsStatus(`Promise 에러: ${reason}`);
+  });
+
+  async function playJapaneseInPlayer(textValue) {
+    const text = String(textValue || "").trim();
+    if (!text || !jpTtsPlayer) {
+      return;
+    }
+
+    if (jpTtsObjectUrl) {
+      try {
+        URL.revokeObjectURL(jpTtsObjectUrl);
+      } catch (_err) {
+      }
+      jpTtsObjectUrl = null;
+    }
+
+    setJpTtsStatus("음성 생성 요청 중...");
+
+    try {
+      const response = await fetch("/tts_text_post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, lang: "japanese" }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const audioBlob = await response.blob();
+      jpTtsObjectUrl = URL.createObjectURL(audioBlob);
+      setPlayerUrl(jpTtsObjectUrl);
+
+      setJpTtsStatus("재생 시작 시도...");
+      const playPromise = jpTtsPlayer.play();
+      if (playPromise && typeof playPromise.then === "function") {
+        await playPromise;
+      }
+
+      setJpTtsStatus("재생 방식: 현재 페이지 플레이어(POST)");
+      return;
+    } catch (error) {
+      console.error("Japanese TTS POST playback failed:", error);
+      const errText = `${error && error.name ? error.name : "Error"}: ${error && error.message ? error.message : "unknown"}`;
+      setJpTtsStatus(`POST 실패 -> GET 재시도 (${errText})`);
+    }
+
+    // POST 실패 시 GET으로 마지막 재시도
+    const fallbackUrl = buildJapaneseTtsUrl(text);
+    if (!fallbackUrl) {
+      return;
+    }
+    setPlayerUrl(fallbackUrl);
+
+    const playPromise = jpTtsPlayer.play();
+    if (playPromise && typeof playPromise.then === "function") {
+      playPromise
+        .then(() => {
+          setJpTtsStatus("재생 방식: 현재 페이지 플레이어(GET)");
+        })
+        .catch((error) => {
+          console.error("Japanese player playback failed:", error);
+          const errText = `${error && error.name ? error.name : "Error"}: ${error && error.message ? error.message : "unknown"}`;
+          setJpTtsStatus(`자동재생 차단/재생 실패 (${errText}) -> 아래 플레이어 재생 버튼 클릭`);
+          try {
+            jpTtsPlayer.focus();
+          } catch (_err) {
+          }
+        });
+      return;
+    }
+
+    setJpTtsStatus("재생 방식: 현재 페이지 플레이어(GET)");
+  }
+
+  function playJapaneseTts(textValue) {
+    playJapaneseInPlayer(textValue);
+  }
+
+  function getVisibleJapaneseTexts() {
+    return Array.from(document.querySelectorAll(".jp-clickable"))
+      .map((el) => parseTtsTextFromElement(el).trim())
+      .filter((text) => text.length > 0);
+  }
+
+  function waitUntilPlaybackEnds() {
+    if (!jpTtsPlayer) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      const cleanup = () => {
+        jpTtsPlayer.removeEventListener("ended", onDone);
+        jpTtsPlayer.removeEventListener("error", onDone);
+      };
+
+      const onDone = () => {
+        cleanup();
+        resolve();
+      };
+
+      jpTtsPlayer.addEventListener("ended", onDone, { once: true });
+      jpTtsPlayer.addEventListener("error", onDone, { once: true });
+    });
+  }
+
+  async function playAllVisibleJapanese() {
+    if (isPlayAllRunning) {
+      setJpTtsStatus("이미 전체재생 중입니다.");
+      return;
+    }
+
+    const texts = getVisibleJapaneseTexts();
+    if (!texts.length) {
+      setJpTtsStatus("전체재생할 문장이 없습니다.");
+      return;
+    }
+
+    isPlayAllRunning = true;
+    if (playAllBtn) playAllBtn.disabled = true;
+
+    try {
+      for (let i = 0; i < texts.length; i += 1) {
+        if (!isPlayAllRunning) {
+          setJpTtsStatus("전체재생이 중지되었습니다.");
+          return;
+        }
+
+        setJpTtsStatus(`전체재생 ${i + 1}/${texts.length} 준비 중...`);
+        await playJapaneseInPlayer(texts[i]);
+
+        if (!isPlayAllRunning) {
+          setJpTtsStatus("전체재생이 중지되었습니다.");
+          return;
+        }
+
+        await waitUntilPlaybackEnds();
+      }
+
+      setJpTtsStatus(`전체재생 완료 (${texts.length}문장)`);
+    } finally {
+      isPlayAllRunning = false;
+      if (playAllBtn) playAllBtn.disabled = false;
+    }
+  }
+
+  function stopPlayAllJapanese() {
+    isPlayAllRunning = false;
+    if (jpTtsPlayer) {
+      try {
+        jpTtsPlayer.pause();
+        jpTtsPlayer.currentTime = 0;
+      } catch (_err) {
+      }
+    }
+    setJpTtsStatus("전체재생 중지");
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    setJpTtsStatus("TTS 스크립트 로드 완료");
+
+    if (playAllBtn) {
+      playAllBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        playAllVisibleJapanese();
+      });
+    }
+
+    if (stopAllBtn) {
+      stopAllBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        stopPlayAllJapanese();
+      });
+    }
+
+    document.querySelectorAll(".jp-clickable").forEach((el) => {
+      el.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const text = parseTtsTextFromElement(el);
+        playJapaneseTts(text);
+      });
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="w-full">
+  <h2 class="text-2xl font-bold text-gray-800 mb-2">일본어 등록 페이지</h2>
+  <p class="text-sm text-gray-500 mb-6">챗에서 받은 표를 그대로 붙여 넣으면 DAY 01 형식으로 저장됩니다.</p>
+
+  {% if success %}
+  <div class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700 text-sm">{{ success }}</div>
+  {% endif %}
+
+  {% if error %}
+  <div class="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-rose-700 text-sm">{{ error }}</div>
+  {% endif %}
+
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
+    <form class="space-y-4" method="post" action="{{ url_for('japanese_register_parse') }}">
+      <label class="block">
+        <span class="text-sm font-medium text-gray-700">제목</span>
+        <input
+          type="text"
+          name="study_title"
+          class="mt-1 w-full border rounded-lg px-3 py-2 text-sm"
+          placeholder="예: 일본어 일상/직장 패턴 10문장"
+          value="{{ draft_title or default_title }}"
+          required
+        />
+      </label>
+
+      <label class="block">
+        <span class="text-sm font-medium text-gray-700">붙여 넣기 내용</span>
+        <textarea
+          name="bulk_text"
+          class="mt-1 w-full border rounded-lg px-3 py-2 h-64 font-mono text-sm"
+          placeholder="No\t분야\t일본어\t히라가나\t한국어 뜻\t자연스러운 해석\t핵심 단어\t문법 포인트 형식으로 붙여 넣으세요"
+          required
+        >{{ draft_text }}</textarea>
+      </label>
+
+      <div class="flex items-center justify-end gap-2">
+        <button type="reset" class="px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50">초기화</button>
+        <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">파싱하기</button>
+      </div>
+    </form>
+  </div>
+
+  {% if parsed_rows %}
+  <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <h3 class="text-lg font-semibold text-gray-800">파싱된 데이터 확인</h3>
+        <p class="text-sm text-indigo-700 font-semibold mt-1">제목: {{ draft_title or default_title }}</p>
+      </div>
+      <span class="text-xs text-gray-500">{{ parsed_rows|length }}건</span>
+    </div>
+
+    <div class="overflow-x-auto mb-4">
+      <table class="min-w-full text-sm border-collapse">
+        <thead>
+          <tr class="bg-slate-100 text-gray-700">
+            <th class="border px-3 py-2 text-left">제목</th>
+            <th class="border px-3 py-2 text-left">분야</th>
+            <th class="border px-3 py-2 text-left">일본어</th>
+            <th class="border px-3 py-2 text-left">한국어 뜻</th>
+            <th class="border px-3 py-2 text-left">문법 포인트</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in parsed_rows %}
+          <tr class="hover:bg-slate-50">
+            <td class="border px-3 py-2">{{ draft_title or default_title }}</td>
+            <td class="border px-3 py-2">{{ row.category }}</td>
+            <td class="border px-3 py-2">{{ row.japanese_text }}</td>
+            <td class="border px-3 py-2">{{ row.korean_meaning }}</td>
+            <td class="border px-3 py-2">{{ row.grammar_point }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <form method="post" action="{{ url_for('japanese_register_import') }}" class="flex justify-end">
+      <input type="hidden" name="study_title" value="{{ draft_title or default_title }}" />
+      <textarea name="parsed_json" class="hidden">{{ parsed_rows | tojson }}</textarea>
+      <button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">저장 하기</button>
+    </form>
+  </div>
+  {% endif %}
+
+  {# 요청에 따라 저장된 목록 섹션은 화면에서 숨김 처리 #}
+</div>
+{% endblock %}
