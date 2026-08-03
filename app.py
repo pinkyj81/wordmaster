@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
+from typing import Any
 from datetime import datetime, timezone, timedelta
 from gtts import gTTS
 from functools import wraps
