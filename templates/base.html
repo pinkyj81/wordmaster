@@ -611,9 +611,12 @@
       <!-- 출처 선택 -->
       <div class="mb-4">
         <label class="block mb-2 text-gray-700 font-medium">출처 선택</label>
-        <select id="mgmtSourceSelector" class="border rounded px-3 py-2 w-full max-w-md" onchange="mgmtLoadTitlesBySource()">
-          <option value="">출처를 선택하세요</option>
-        </select>
+        <div class="flex flex-wrap items-center gap-3">
+          <select id="mgmtSourceSelector" class="border rounded px-3 py-2 w-full max-w-md" onchange="mgmtLoadTitlesBySource()">
+            <option value="">출처를 선택하세요</option>
+          </select>
+          <button onclick="mgmtPrintSourceWordsOnly()" class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700 text-sm">출처 전체 단어 프린트</button>
+        </div>
       </div>
 
       <!-- 본문 제목 선택 -->
@@ -968,6 +971,18 @@ function mgmtPrintWordsPdf(layout = 'card') {
   }
 
   const printUrl = `/print_words/${encodeURIComponent(textId)}?known=${encodeURIComponent(knownFilter)}&layout=${encodeURIComponent(layout)}`;
+  window.open(printUrl, '_blank');
+}
+
+function mgmtPrintSourceWordsOnly() {
+  const sourceSelector = document.getElementById('mgmtSourceSelector');
+  const source = sourceSelector ? sourceSelector.value : '';
+  if (!source) {
+    alert('먼저 출처를 선택하세요.');
+    return;
+  }
+
+  const printUrl = `/print_source_words?source=${encodeURIComponent(source)}`;
   window.open(printUrl, '_blank');
 }
 

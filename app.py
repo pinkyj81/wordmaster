@@ -2384,6 +2384,81 @@ def print_words(text_id):
     )
 
 
+@app.route('/print_source_words')
+@login_required
+def print_source_words():
+    """Render a print-friendly page that shows words only for a selected source."""
+    source = (request.args.get('source') or '').strip()
+    if not source:
+        return "출처가 선택되지 않았습니다.", 400
+
+    is_admin = session.get('is_admin', False)
+    if not is_admin:
+        allowed_sources = set(get_user_sources())
+        if source not in allowed_sources:
+            return "해당 출처에 접근 권한이 없습니다.", 403
+
+    query = text("""
+        SELECT
+            t.id AS text_id,
+            t.title,
+            w.word
+        FROM words_rows w
+        INNER JOIN text_records_rows t ON t.id = w.text_id
+        WHERE t.source = :source
+          AND w.word IS NOT NULL
+          AND LTRIM(RTRIM(w.word)) <> ''
+        ORDER BY
+            CASE WHEN TRY_CONVERT(INT, t.title) IS NULL THEN 1 ELSE 0 END,
+            TRY_CONVERT(INT, t.title),
+            t.title,
+            w.word
+    """)
+    rows = db.session.execute(query, {"source": source}).fetchall()
+
+    grouped = []
+    current_title = None
+    current_text_id = None
+    current_words = []
+
+    for r in rows:
+        title = (r.title or '(제목 없음)').strip() if isinstance(r.title, str) else (r.title or '(제목 없음)')
+        text_id = r.text_id
+        word = str(r.word or '').strip()
+        if not word:
+            continue
+
+        if current_title != title or current_text_id != text_id:
+            if current_title is not None:
+                grouped.append({
+                    'text_id': current_text_id,
+                    'title': current_title,
+                    'words': current_words,
+                    'count': len(current_words),
+                })
+            current_title = title
+            current_text_id = text_id
+            current_words = []
+
+        current_words.append(word)
+
+    if current_title is not None:
+        grouped.append({
+            'text_id': current_text_id,
+            'title': current_title,
+            'words': current_words,
+            'count': len(current_words),
+        })
+
+    total_count = sum(g['count'] for g in grouped)
+    return render_template(
+        'word_print_source_words.html',
+        source=source,
+        groups=grouped,
+        total_count=total_count,
+    )
+
+
 
 # ✅ 단어 수정
 @app.route('/update_word', methods=['POST'])

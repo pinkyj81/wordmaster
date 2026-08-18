@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ source }} 단어 전체 프린트</title>
+  <style>
+    :root {
+      --text: #111827;
+      --muted: #4b5563;
+      --line: #e5e7eb;
+      --accent: #2563eb;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif;
+      color: var(--text);
+      background: #ffffff;
+    }
+
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 22px 20px 30px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .meta {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #111827;
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      border-color: #1d4ed8;
+      background: var(--accent);
+      color: #ffffff;
+    }
+
+    .word-columns {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, 200px);
+      gap: 10px 18px;
+      justify-content: start;
+    }
+
+    .title-section {
+      margin-bottom: 18px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+      break-inside: avoid;
+    }
+
+    .title-heading {
+      margin: 0 0 10px;
+      font-size: 18px;
+      font-weight: 800;
+      color: #0f172a;
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      background: #f5f3ff;
+      border: 1px solid #ddd6fe;
+      border-left: 6px solid #c4b5fd;
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+
+    .title-sub {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .word-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+      width: 200px;
+      font-size: 18px;
+      line-height: 1.35;
+      font-weight: 400;
+      letter-spacing: 0.01em;
+      background: #fff;
+    }
+
+    .empty {
+      border: 1px dashed #cbd5e1;
+      border-radius: 10px;
+      padding: 28px;
+      text-align: center;
+      color: #64748b;
+      font-size: 16px;
+    }
+
+    @media (max-width: 1000px) {
+      .word-columns {
+        grid-template-columns: repeat(auto-fill, 200px);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .topbar {
+        flex-direction: column;
+      }
+
+      .word-columns {
+        grid-template-columns: repeat(1, 200px);
+      }
+
+      .word-item {
+        font-size: 17px;
+      }
+    }
+
+    @media print {
+      html, body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .actions {
+        display: none;
+      }
+
+      .page {
+        max-width: none;
+        padding: 0;
+      }
+
+      .topbar {
+        margin-bottom: 12px;
+      }
+
+      .title-heading {
+        background: #f5f3ff !important;
+        border-color: #ddd6fe !important;
+        border-left: 6px solid #c4b5fd !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="topbar">
+      <div>
+        <div class="meta">{{ source }} | 단어 수: {{ total_count }}개</div>
+      </div>
+      <div class="actions">
+        <button class="btn" onclick="window.close()">닫기</button>
+        <button class="btn primary" onclick="window.print()">인쇄 / PDF 저장</button>
+      </div>
+    </section>
+
+    {% if groups %}
+    <section aria-label="출처 단어 목록">
+      {% for group in groups %}
+      <div class="title-section">
+        <h2 class="title-heading">
+          <span>{{ group.title }}</span>
+          <span class="title-sub">{{ group.count }}개</span>
+        </h2>
+        <div class="word-columns">
+          {% for w in group.words %}
+          <div class="word-item">{{ w }}</div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </section>
+    {% else %}
+    <div class="empty">해당 출처에 인쇄할 단어가 없습니다.</div>
+    {% endif %}
+  </main>
+</body>
+</html>
