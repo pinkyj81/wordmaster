@@ -616,9 +616,21 @@ document.getElementById('uploadTextForm').addEventListener('submit', async (e) =
     body: JSON.stringify({ title, source, content, language })
   });
   const data = await res.json();
-  alert(data.message || data.error);
-  closeUploadModal();
-  location.reload();
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
+
+  alert(data.message || '저장 완료');
+  // 모달은 유지하고 입력만 정리해 연속 등록을 쉽게 한다.
+  document.getElementById('textTitle').value = '';
+  document.getElementById('textContent').value = '';
+  document.getElementById('textTitle').focus();
+
+  // 현재 선택된 출처/본문 콤보가 있으면 새 본문 반영
+  if ((document.getElementById('wordSourceSelect')?.value || '').trim()) {
+    loadWordTextsBySource();
+  }
 });
 
 function parseBulkTextLines(rawText) {
@@ -666,8 +678,12 @@ async function submitBulkTexts() {
     ? `\n중복 ID: ${data.conflict_ids.join(', ')}`
     : '';
   alert(`${data.message}${conflictHint}`);
-  closeUploadModal();
-  location.reload();
+  // 모달 유지: 연속 대량등록을 위해 입력만 비움
+  document.getElementById('bulkTextInput').value = '';
+
+  if ((document.getElementById('wordSourceSelect')?.value || '').trim()) {
+    loadWordTextsBySource();
+  }
 }
 
 /* 단어 업로드 */
@@ -691,9 +707,16 @@ document.getElementById('uploadWordsForm').addEventListener('submit', async (e) 
     body: JSON.stringify({ text_id: finalTextId, words })
   });
   const data = await res.json();
-  alert(data.message || data.error);
-  closeUploadModal();
-  location.reload();
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
+
+  alert(data.message || '저장 완료');
+  // 모달 유지: 같은 본문에 연속 저장할 수 있게 입력/미리보기만 초기화
+  document.getElementById('wordsInput').value = '';
+  previewBody.innerHTML = '';
+  document.getElementById('wordsInput').focus();
 });
 /* ✅ 본문 기록 검색(제목/내용/출처/단어) + 출처 필터 */
 const sourceFilter = document.getElementById("sourceFilter");
