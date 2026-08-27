@@ -454,26 +454,96 @@
     // 지원 형식:
     // 1) 단어[TAB]뜻[TAB]예문(선택)
     // 2) 본문ID[TAB]단어[TAB]뜻[TAB]예문(선택)
-    // 3) 본문ID 단어 뜻 (공백 구분)
+    // 3) 단어 - 뜻 / 단어 : 뜻 / 번호+단어+뜻
+    // 4) Markdown 표(|) / ChatGPT 복붙 텍스트(불릿/번호/\t 문자열)
     function parseBulkWordLines(rawList, selectedTextId = '') {
+      const normalizeHeaderToken = (value) => (value || '').replace(/\s+/g, '').toLowerCase();
+      const isTableHeaderRow = (parts) => {
+        const joined = parts.map(normalizeHeaderToken).join('|');
+        if (!joined) return false;
+        const hasWordLike = /(단어|word|일본어|japanese|jpn)/.test(joined);
+        const hasMeaningLike = /(뜻|의미|meaning|해석|번역)/.test(joined);
+        const hasExampleLike = /(예문|example|문장)/.test(joined);
+        const hasNoLike = /(^|\|)(번호|no|id)(\||$)/.test(joined);
+        return (hasWordLike && hasMeaningLike) || (hasNoLike && (hasWordLike || hasMeaningLike || hasExampleLike));
+      };
+
+      const isLikelyReading = (value) => {
+        const text = (value || '').trim();
+        if (!text) return false;
+        // e.g. えいがかん / （えいがかん） / えいがかん(映画館)
+        return /^[\s\(\)（）ぁ-ゖァ-ヺー・]+$/.test(text);
+      };
+
+      const hasJapaneseChars = (value) => /[ぁ-ゖァ-ヺ一-龯々〆〤]/.test(value || '');
+      const hasKoreanChars = (value) => /[가-힣]/.test(value || '');
+
+      const normalizeLine = (line) => {
+        let text = String(line || '')
+          .replace(/\u00a0/g, ' ')
+          .replace(/\u200b/g, '')
+          .trim();
+
+        if (!text) return '';
+        if (text.startsWith('```')) return '';
+
+        // ChatGPT/문서 복붙 시 붙는 불릿/번호 제거
+        text = text
+          .replace(/^[-*•▪·]+\s*/, '')
+          .replace(/^\d+\s*[.)]\s*/, '')
+          .trim();
+
+        return text;
+      };
+
       const lines = rawList
         .split('\n')
-        .map(line => line.trim())
+        .map(normalizeLine)
         .filter(Boolean);
 
       const words = lines.map(line => {
-        const hasTab = line.includes('\t');
-        const parts = hasTab
-          ? line.split('\t').map(p => p.trim())
-          : line.split(/\s+/).map(p => p.trim());
+        // Markdown 표 구분선(예: |---|---|)은 무시
+        if (/^\|?\s*:?[-]{2,}:?\s*(\|\s*:?[-]{2,}:?\s*)+\|?$/.test(line)) {
+          return null;
+        }
+
+        const hasRealTab = line.includes('\t');
+        const hasEscapedTab = line.includes('\\t');
+        const hasPipe = line.includes('|');
+
+        let parts = [];
+        let hasTab = false;
+        if (hasRealTab) {
+          hasTab = true;
+          parts = line.split(/\t+/).map(p => p.trim()).filter(Boolean);
+        } else if (hasEscapedTab) {
+          hasTab = true;
+          parts = line.split(/(?:\\t)+/).map(p => p.trim()).filter(Boolean);
+        } else if (hasPipe) {
+          parts = line
+            .replace(/^\|/, '')
+            .replace(/\|$/, '')
+            .split('|')
+            .map(p => p.trim())
+            .filter(Boolean);
+        } else {
+          const sepMatch = line.match(/^(.+?)\s*(?:-|:)\s+(.+)$/);
+          if (sepMatch) {
+            parts = [sepMatch[1].trim(), sepMatch[2].trim()];
+          } else {
+            parts = line.split(/\s+/).map(p => p.trim()).filter(Boolean);
+          }
+        }
 
         if (!parts.length) return null;
+
+        if (isTableHeaderRow(parts)) return null;
 
         const c1 = (parts[0] || '').replace(/\s+/g, '').toLowerCase();
         const c2 = (parts[1] || '').replace(/\s+/g, '').toLowerCase();
         const c3 = (parts[2] || '').replace(/\s+/g, '').toLowerCase();
         const isHeader = (
-          (c1.includes('본문id') || c1 === 'textid' || c1 === 'text_id') &&
+          (c1.includes('본문id') || c1 === 'textid' || c1 === 'text_id' || c1 === 'id' || c1 === '번호' || c1 === 'no') &&
           (c2.includes('단어') || c2 === 'word') &&
           (c3.includes('뜻') || c3 === 'meaning')
         );
@@ -481,7 +551,42 @@
 
         if (parts.length < 2) return null;
 
+        const hadLeadingIndexForPipe = hasPipe && /^\d+$/.test(parts[0] || '');
+
+        // 표 형식(|)에서 첫 열 숫자는 대부분 행번호이므로 제거
+        if (hadLeadingIndexForPipe && parts.length >= 3) {
+          parts = parts.slice(1);
+        }
+
+        // 일본어 표: [일본어(+읽기), 뜻(한글), 예문(일본어), 해석(한글)]
+        if (hasPipe && parts.length >= 3 && hasJapaneseChars(parts[0]) && hasKoreanChars(parts[1])) {
+          const jpExample = (parts[2] || '').trim();
+          const koExample = (parts[3] || '').trim();
+          return {
+            text_id: '',
+            // 요청사항: 단어는 읽기 포함 원문 그대로 유지
+            word: (parts[0] || '').trim(),
+            meaning: parts[1] || '',
+            example: koExample ? `${jpExample} ${koExample}` : jpExample,
+            exam_korean: koExample
+          };
+        }
+
+        // 일본어 표 형식: [단어, 읽기, 뜻, 예문, 해석] -> 단어/뜻/예문으로 매핑
+        if (parts.length >= 4 && isLikelyReading(parts[1])) {
+          const jpExample = (parts[3] || '').trim();
+          const koExample = (parts[4] || '').trim();
+          return {
+            text_id: '',
+            word: parts[0] || '',
+            meaning: parts[2] || '',
+            example: koExample ? `${jpExample} ${koExample}` : jpExample,
+            exam_korean: koExample
+          };
+        }
+
         const hasNumericLead = /^\d+$/.test(parts[0] || '');
+
         if (hasNumericLead && parts.length >= 3) {
           return {
             text_id: parts[0] || '',
@@ -560,8 +665,9 @@
         body: JSON.stringify({ text_id: selectedTextId, words })
       })
       .then(res => res.json())
-      .then(() => {
-        alert('✅ 단어 업로드 완료');
+      .then(data => {
+        if (data.error) return alert(`❌ ${data.error}`);
+        alert(`✅ ${data.message || '단어 업로드 완료'}`);
         closeUploadModal();
         location.reload();
       })

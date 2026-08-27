@@ -40,6 +40,14 @@ def normalize_language_value(language_value):
     return aliases.get(language, 'english')
 
 
+def _sql_literal(value: Any) -> str:
+    """Return a SQL-safe NVARCHAR literal for legacy ODBC parameter issues."""
+    if value is None:
+        return "NULL"
+    text_value = str(value).replace("'", "''")
+    return f"N'{text_value}'"
+
+
 def ensure_text_language_column():
     try:
         exists = db.session.execute(text("""
@@ -81,15 +89,32 @@ DB_USER = os.getenv("DB_USER", "pinkyj81").strip()
 DB_PASSWORD = os.getenv("DB_PASSWORD", "zoskek38!!").strip()
 DB_DRIVER = _resolve_db_driver(os.getenv("DB_DRIVER", ""))
 
-odbc_connection_string = (
-    f"DRIVER={{{DB_DRIVER}}};"
-    f"SERVER={DB_SERVER};"
-    f"DATABASE={DB_NAME};"
-    f"UID={DB_USER};"
-    f"PWD={DB_PASSWORD};"
-    "Encrypt=yes;"
-    "TrustServerCertificate=yes;"
-)
+def _build_odbc_connection_string() -> str:
+    base = (
+        f"DRIVER={{{DB_DRIVER}}};"
+        f"SERVER={DB_SERVER};"
+        f"DATABASE={DB_NAME};"
+        f"UID={DB_USER};"
+        f"PWD={DB_PASSWORD};"
+    )
+
+    # Legacy "SQL Server" driver often fails TLS handshake with Encrypt=yes.
+    env_encrypt = (os.getenv("DB_ENCRYPT", "") or "").strip().lower()
+    if env_encrypt in {"yes", "true", "1"}:
+        encrypt = "yes"
+    elif env_encrypt in {"no", "false", "0"}:
+        encrypt = "no"
+    elif DB_DRIVER.strip().lower() == "sql server":
+        encrypt = "no"
+    else:
+        encrypt = "yes"
+
+    if encrypt == "yes":
+        return base + "Encrypt=yes;TrustServerCertificate=yes;"
+    return base + "Encrypt=no;"
+
+
+odbc_connection_string = _build_odbc_connection_string()
 
 app.config['SQLALCHEMY_DATABASE_URI'] = "mssql+pyodbc:///?odbc_connect=" + quote_plus(odbc_connection_string)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -560,21 +585,26 @@ def save_test_result():
 def flashcards(text_id):
     ensure_text_language_column()
     # 암기되지 않은 단어만 가져오기 (is_learned가 False 또는 NULL)
-    text_row = db.session.execute(
-        text("SELECT title, language FROM text_records_rows WHERE id = :id"),
-        {"id": text_id}
-    ).fetchone()
+    text_id_literal = _sql_literal(text_id)
+    text_row = db.session.execute(text(f"""
+        SELECT title, language
+        FROM text_records_rows
+        WHERE id = {text_id_literal}
+    """)).fetchone()
     text_language = normalize_language_value(getattr(text_row, 'language', None) or 'english')
 
-    words = WordsRow.query.filter_by(text_id=text_id).filter(
-        or_(WordsRow.is_learned == False, WordsRow.is_learned.is_(None))
-    ).all()
+    words = db.session.execute(text(f"""
+        SELECT word, meaning, text_title, sentence, language
+        FROM words_rows
+        WHERE text_id = {text_id_literal}
+          AND (is_learned = 0 OR is_learned IS NULL)
+    """)).fetchall()
     word_list = [
         {
             "word": w.word,
             "meaning": w.meaning,
             "text_title": w.text_title,
-            "sentence": w.example or "",
+            "sentence": (w.sentence or ""),
             "language": normalize_language_value(w.language or text_language),
         }
         for w in words
@@ -1787,36 +1817,35 @@ def api_search_words():
     if not search_query:
         return jsonify([])
     
+    pattern_literal = _sql_literal(f"%{search_query}%")
+
     # 검색 조건 생성
     if search_type == 'word':
-        sql_query = text("""
+        sql_query = text(f"""
             SELECT id, word, meaning, exam_korean, sentence AS example, is_learned, 
                    text_id, text_title, created_at
             FROM words_rows
-            WHERE word LIKE :query
+            WHERE word LIKE {pattern_literal}
             ORDER BY word ASC
         """)
-        params = {"query": f"%{search_query}%"}
     elif search_type == 'meaning':
-        sql_query = text("""
+        sql_query = text(f"""
             SELECT id, word, meaning, exam_korean, sentence AS example, is_learned, 
                    text_id, text_title, created_at
             FROM words_rows
-            WHERE meaning LIKE :query
+            WHERE meaning LIKE {pattern_literal}
             ORDER BY word ASC
         """)
-        params = {"query": f"%{search_query}%"}
     else:  # all
-        sql_query = text("""
+        sql_query = text(f"""
             SELECT id, word, meaning, exam_korean, sentence AS example, is_learned, 
                    text_id, text_title, created_at
             FROM words_rows
-            WHERE word LIKE :query OR meaning LIKE :query
+            WHERE word LIKE {pattern_literal} OR meaning LIKE {pattern_literal}
             ORDER BY word ASC
         """)
-        params = {"query": f"%{search_query}%"}
     
-    results = db.session.execute(sql_query, params).fetchall()
+    results = db.session.execute(sql_query).fetchall()
     
     return jsonify([{
         "id": r.id,

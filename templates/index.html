@@ -20,7 +20,7 @@
   </div>
 
   <div class="flex items-center space-x-2">
-    <input type="text" placeholder="제목, 내용, 출처 검색..."
+    <input id="recordSearchInput" type="text" placeholder="제목, 내용, 출처, 단어 검색..."
            class="border px-3 py-1 rounded-md w-64 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
     <button type="button" id="openUnknownTestBtn" onclick="openUnknownTestModal()"
             class="bg-green-500 text-white px-3 py-1 rounded hover:bg-green-600 transition">
@@ -33,8 +33,10 @@
 <div class="space-y-3">
   {% for text in texts %}
   <div id="text-card-{{ text.id }}"
-    class="flex justify-between items-center p-4 rounded-lg border hover:shadow-md transition"
+    class="text-record-card flex justify-between items-center p-4 rounded-lg border hover:shadow-md transition"
     data-source="{{ text.source }}"
+    data-title="{{ text.title|e }}"
+    data-content="{{ text.content|e }}"
     style="background-color: {% if text.test_count >= 5 %}#f3e8ff{% else %}#ffffff{% endif %};">
     
     <div>
@@ -157,13 +159,15 @@
     <div id="wordUploadTab" class="hidden">
       <form id="uploadWordsForm">
         <div class="mb-3">
+          <label class="block font-medium text-gray-700 mb-1">출처 선택</label>
+          <select id="wordSourceSelect" class="w-full border rounded-md px-3 py-2" onchange="loadWordTextsBySource()">
+            <option value="">출처를 선택하세요</option>
+          </select>
+        </div>
+        <div class="mb-3">
           <label class="block font-medium text-gray-700 mb-1">본문 선택</label>
-          <select id="textSelect" class="w-full border rounded-md px-3 py-2">
-            <option value="AUTO_BULK" selected>본문 선택 없이 대량등록 (엑셀 복붙)</option>
-            <option value="">본문을 선택하세요</option>
-            {% for t in texts %}
-              <option value="{{ t.id }}">{{ t.title }}</option>
-            {% endfor %}
+          <select id="textSelect" class="w-full border rounded-md px-3 py-2" disabled>
+            <option value="">출처를 먼저 선택하세요</option>
           </select>
         </div>
         <div class="mb-3">
@@ -359,6 +363,66 @@ function switchTab(tab) {
     wordBtn.classList.remove('text-gray-500');
     textBtn.classList.remove('text-blue-600', 'border-blue-600');
     textBtn.classList.add('text-gray-500');
+    loadWordSourceOptions();
+  }
+}
+
+async function loadWordSourceOptions() {
+  const sourceSelect = document.getElementById('wordSourceSelect');
+  const textSelect = document.getElementById('textSelect');
+  if (!sourceSelect || !textSelect) return;
+
+  sourceSelect.innerHTML = '<option value="">출처를 선택하세요</option>';
+  textSelect.innerHTML = '<option value="">출처를 먼저 선택하세요</option>';
+  textSelect.disabled = true;
+
+  try {
+    const res = await fetch('/get_sources');
+    const sources = await res.json();
+    sources.forEach(src => {
+      const value = (src.source || '').trim();
+      if (!value) return;
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = value;
+      sourceSelect.appendChild(opt);
+    });
+  } catch (err) {
+    console.error('출처 목록 로드 실패:', err);
+  }
+}
+
+async function loadWordTextsBySource() {
+  const source = (document.getElementById('wordSourceSelect')?.value || '').trim();
+  const textSelect = document.getElementById('textSelect');
+  if (!textSelect) return;
+
+  textSelect.innerHTML = '<option value="">본문을 선택하세요</option>';
+  if (!source) {
+    textSelect.innerHTML = '<option value="">출처를 먼저 선택하세요</option>';
+    textSelect.disabled = true;
+    previewBody.innerHTML = '';
+    return;
+  }
+
+  textSelect.disabled = false;
+  try {
+    const res = await fetch(`/get_titles_by_source/${encodeURIComponent(source)}`);
+    const titles = await res.json();
+    if (!Array.isArray(titles) || !titles.length) {
+      textSelect.innerHTML = '<option value="">해당 출처의 본문이 없습니다</option>';
+      return;
+    }
+
+    titles.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.title;
+      textSelect.appendChild(opt);
+    });
+  } catch (err) {
+    console.error('본문 목록 로드 실패:', err);
+    textSelect.innerHTML = '<option value="">본문 로드 실패</option>';
   }
 }
 
@@ -372,24 +436,89 @@ const previewBody = document.getElementById('previewTable');
 // 2) 본문ID[TAB]단어[TAB]뜻[TAB]예문(선택)
 // 3) 본문ID 단어 뜻 (공백 구분)
 function parseWordUploadLines(rawText, selectedTextId = '') {
+  const normalizeHeaderToken = (value) => (value || '').replace(/\s+/g, '').toLowerCase();
+  const isTableHeaderRow = (parts) => {
+    const joined = parts.map(normalizeHeaderToken).join('|');
+    if (!joined) return false;
+    const hasWordLike = /(단어|word|일본어|japanese|jpn)/.test(joined);
+    const hasMeaningLike = /(뜻|의미|meaning|해석|번역)/.test(joined);
+    const hasExampleLike = /(예문|example|문장)/.test(joined);
+    const hasNoLike = /(^|\|)(번호|no|id)(\||$)/.test(joined);
+    return (hasWordLike && hasMeaningLike) || (hasNoLike && (hasWordLike || hasMeaningLike || hasExampleLike));
+  };
+
+  const isLikelyReading = (value) => {
+    const text = (value || '').trim();
+    if (!text) return false;
+    return /^[\s\(\)（）ぁ-ゖァ-ヺー・]+$/.test(text);
+  };
+
+  const hasJapaneseChars = (value) => /[ぁ-ゖァ-ヺ一-龯々〆〤]/.test(value || '');
+  const hasKoreanChars = (value) => /[가-힣]/.test(value || '');
+
+  const normalizeLine = (line) => {
+    let text = String(line || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\u200b/g, '')
+      .trim();
+
+    if (!text) return '';
+    if (text.startsWith('```')) return '';
+
+    text = text
+      .replace(/^[-*•▪·]+\s*/, '')
+      .replace(/^\d+\s*[.)]\s*/, '')
+      .trim();
+
+    return text;
+  };
+
   const lines = rawText
     .split('\n')
-    .map(line => line.trim())
+    .map(normalizeLine)
     .filter(Boolean);
 
   const words = lines.map(line => {
-    const hasTab = line.includes('\t');
-    const parts = hasTab
-      ? line.split('\t').map(p => p.trim())
-      : line.split(/\s+/).map(p => p.trim());
+    if (/^\|?\s*:?[-]{2,}:?\s*(\|\s*:?[-]{2,}:?\s*)+\|?$/.test(line)) {
+      return null;
+    }
+
+    const hasRealTab = line.includes('\t');
+    const hasEscapedTab = line.includes('\\t');
+    const hasPipe = line.includes('|');
+
+    let parts = [];
+    let hasTab = false;
+    if (hasRealTab) {
+      hasTab = true;
+      parts = line.split(/\t+/).map(p => p.trim()).filter(Boolean);
+    } else if (hasEscapedTab) {
+      hasTab = true;
+      parts = line.split(/(?:\\t)+/).map(p => p.trim()).filter(Boolean);
+    } else if (hasPipe) {
+      parts = line
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map(p => p.trim())
+        .filter(Boolean);
+    } else {
+      const sepMatch = line.match(/^(.+?)\s*(?:-|:)\s+(.+)$/);
+      if (sepMatch) {
+        parts = [sepMatch[1].trim(), sepMatch[2].trim()];
+      } else {
+        parts = line.split(/\s+/).map(p => p.trim()).filter(Boolean);
+      }
+    }
 
     if (!parts.length) return null;
+    if (isTableHeaderRow(parts)) return null;
 
     const c1 = (parts[0] || '').replace(/\s+/g, '').toLowerCase();
     const c2 = (parts[1] || '').replace(/\s+/g, '').toLowerCase();
     const c3 = (parts[2] || '').replace(/\s+/g, '').toLowerCase();
     const isHeader = (
-      (c1.includes('본문id') || c1 === 'textid' || c1 === 'text_id') &&
+      (c1.includes('본문id') || c1 === 'textid' || c1 === 'text_id' || c1 === 'id' || c1 === '번호' || c1 === 'no') &&
       (c2.includes('단어') || c2 === 'word') &&
       (c3.includes('뜻') || c3 === 'meaning')
     );
@@ -397,7 +526,39 @@ function parseWordUploadLines(rawText, selectedTextId = '') {
 
     if (parts.length < 2) return null;
 
+    const hadLeadingIndexForPipe = hasPipe && /^\d+$/.test(parts[0] || '');
+    if (hadLeadingIndexForPipe && parts.length >= 3) {
+      parts = parts.slice(1);
+    }
+
+    // 일본어 표: [일본어(+읽기), 뜻(한글), 예문(일본어), 해석(한글)]
+    if (hasPipe && parts.length >= 3 && hasJapaneseChars(parts[0]) && hasKoreanChars(parts[1])) {
+      const jpExample = (parts[2] || '').trim();
+      const koExample = (parts[3] || '').trim();
+      return {
+        text_id: '',
+        // 요청사항: 단어는 읽기 포함 원문 그대로 유지 (예: 触れる（ふれる）)
+        word: (parts[0] || '').trim(),
+        meaning: parts[1] || '',
+        example: koExample ? `${jpExample} ${koExample}` : jpExample,
+        exam_korean: koExample
+      };
+    }
+
+    if (parts.length >= 4 && isLikelyReading(parts[1])) {
+      const jpExample = (parts[3] || '').trim();
+      const koExample = (parts[4] || '').trim();
+      return {
+        text_id: '',
+        word: parts[0] || '',
+        meaning: parts[2] || '',
+        example: koExample ? `${jpExample} ${koExample}` : jpExample,
+        exam_korean: koExample
+      };
+    }
+
     const hasNumericLead = /^\d+$/.test(parts[0] || '');
+
     if (hasNumericLead && parts.length >= 3) {
       return {
         text_id: parts[0] || '',
@@ -514,15 +675,15 @@ document.getElementById('uploadWordsForm').addEventListener('submit', async (e) 
   e.preventDefault();
   const selectedTextId = document.getElementById('textSelect').value;
   const rawText = document.getElementById('wordsInput').value.trim();
+  if (!document.getElementById('wordSourceSelect').value.trim()) return alert('출처를 먼저 선택해주세요.');
+  if (!selectedTextId) return alert('본문을 선택해주세요.');
   if (!rawText) return alert("단어를 입력해주세요.");
 
   const parsed = parseWordUploadLines(rawText, selectedTextId);
   if (parsed.error) return alert(parsed.error);
 
   const words = parsed.words;
-  const finalTextId = (selectedTextId && selectedTextId !== 'AUTO_BULK')
-    ? selectedTextId
-    : 'AUTO_BULK';
+  const finalTextId = selectedTextId;
 
   const res = await fetch('/upload_words', {
     method: 'POST',
@@ -534,24 +695,64 @@ document.getElementById('uploadWordsForm').addEventListener('submit', async (e) 
   closeUploadModal();
   location.reload();
 });
-/* ✅ 출처 필터 동작 (data-source 속성 기반) */
+/* ✅ 본문 기록 검색(제목/내용/출처/단어) + 출처 필터 */
 const sourceFilter = document.getElementById("sourceFilter");
+const recordSearchInput = document.getElementById('recordSearchInput');
+const recordCards = [...document.querySelectorAll('.text-record-card')];
+let recordSearchTimer = null;
+
+async function fetchMatchedTextIdsByWord(query) {
+  const res = await fetch(`/api/search_words?q=${encodeURIComponent(query)}&type=all`);
+  if (!res.ok) throw new Error(`word search failed: ${res.status}`);
+  const words = await res.json();
+  const ids = new Set();
+  (Array.isArray(words) ? words : []).forEach(w => {
+    const tid = String((w && w.text_id) || '').trim();
+    if (tid) ids.add(tid);
+  });
+  return ids;
+}
+
+async function applyRecordFilters() {
+  const selectedSource = (sourceFilter?.value || '').trim().toLowerCase();
+  const query = (recordSearchInput?.value || '').trim().toLowerCase();
+
+  let wordMatchedIds = new Set();
+  if (query) {
+    try {
+      wordMatchedIds = await fetchMatchedTextIdsByWord(query);
+    } catch (err) {
+      console.error('단어 검색 실패(본문 검색만 적용):', err);
+    }
+  }
+
+  recordCards.forEach(card => {
+    const cardId = (card.id || '').replace('text-card-', '').trim();
+    const cardSource = (card.dataset.source || '').trim().toLowerCase();
+    const cardTitle = (card.dataset.title || '').trim().toLowerCase();
+    const cardContent = (card.dataset.content || '').trim().toLowerCase();
+
+    const sourceMatch = !selectedSource || cardSource === selectedSource;
+    const localMatch = !query || cardTitle.includes(query) || cardContent.includes(query) || cardSource.includes(query);
+    const wordMatch = !query ? false : wordMatchedIds.has(cardId);
+    const visible = sourceMatch && (!query || localMatch || wordMatch);
+
+    card.style.display = visible ? 'flex' : 'none';
+  });
+}
+
 if (sourceFilter) {
-  sourceFilter.addEventListener("change", () => {
-    const selected = sourceFilter.value.trim().toLowerCase();
-    const cards = document.querySelectorAll(".space-y-3 > div.flex.justify-between.items-center");
+  sourceFilter.addEventListener('change', () => {
+    applyRecordFilters();
+  });
+}
 
-    cards.forEach(card => {
-      // data-source 속성에서 출처 읽기
-      const cardSource = (card.dataset.source || "").trim().toLowerCase();
-
-      // 필터링 조건
-      if (!selected || cardSource === selected) {
-        card.style.display = "flex";
-      } else {
-        card.style.display = "none";
-      }
-    });
+if (recordSearchInput) {
+  recordSearchInput.addEventListener('input', () => {
+    if (recordSearchTimer) clearTimeout(recordSearchTimer);
+    recordSearchTimer = setTimeout(() => {
+      applyRecordFilters();
+    }, 250);
   });
 }
 
