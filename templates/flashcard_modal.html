@@ -107,6 +107,9 @@ function getCurrentSentence() {
 
 function removeKoreanForSpeech(text) {
   return String(text || '')
+    // HTML 줄바꿈/태그는 발음하지 않도록 제거
+    .replace(/<br\s*\/?\s*>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
     // 괄호/대괄호 안의 한글 설명은 제거
     .replace(/\s*[\[\(（【「『][^\]\)）】」』]*[\uac00-\ud7a3][^\]\)）】」』]*[\]\)）】」』]\s*/g, ' ')
     // 남아 있는 한글은 제거
