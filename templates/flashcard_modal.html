@@ -58,6 +58,7 @@
 
   <!-- 하단 버튼 -->
   <div class="absolute bottom-10 w-full flex justify-center space-x-4">
+    <button onclick="startAutoPlay()" class="px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600">자동재생</button>
     <button onclick="prevCard()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">◀ 이전</button>
     <button onclick="nextCard()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">다음 ▶</button>
     <button onclick="closeFlashcardModal()" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">닫기</button>
@@ -65,6 +66,23 @@
 </div>
 
 <script>
+let autoPlayTimer = null;
+let autoPlayRunning = false;
+
+function stopAutoPlay() {
+  autoPlayRunning = false;
+  if (autoPlayTimer) {
+    clearTimeout(autoPlayTimer);
+    autoPlayTimer = null;
+  }
+  const btn = document.querySelector('button[onclick="startAutoPlay()"]');
+  if (btn) {
+    btn.textContent = '자동재생';
+    btn.classList.remove('bg-red-500', 'hover:bg-red-600');
+    btn.classList.add('bg-emerald-500', 'hover:bg-emerald-600');
+  }
+}
+
 function playSound(event, text, mode) {
   // 카드 클릭 이벤트가 부모로 전달되지 않게 막기
   event.stopPropagation();
@@ -89,12 +107,44 @@ function getCurrentSentence() {
 
 function removeKoreanForSpeech(text) {
   return String(text || '')
-    // 한글이 포함된 대괄호/소괄호 구간은 통째로 제거
-    .replace(/\s*[\[\(（][^\]\)）]*[\uac00-\ud7a3][^\]\)）]*[\]\)）]\s*/g, ' ')
+    // 괄호/대괄호 안의 한글 설명은 제거
+    .replace(/\s*[\[\(（【「『][^\]\)）】」』]*[\uac00-\ud7a3][^\]\)）】」』]*[\]\)）】」』]\s*/g, ' ')
     // 남아 있는 한글은 제거
-    .replace(/[\uac00-\ud7a3]+/g, '')
+    .replace(/[\uac00-\ud7a3]+/g, ' ')
+    // 흔한 번역 구분 기호 제거
+    .replace(/[|/\\:;]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function formatSentenceForDisplay(text) {
+  const normalized = String(text || '')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/\s*\[?\s*<br\s*\/?\s*>\s*\]?/gi, '\n')
+    .trim();
+
+  if (!normalized || normalized.includes('\n')) {
+    return normalized;
+  }
+
+  const hasKorean = /[\uac00-\ud7a3]/.test(normalized);
+  const hasNonKorean = /[^\uac00-\ud7a3\s]/.test(normalized);
+  if (!hasKorean || !hasNonKorean) {
+    return normalized;
+  }
+
+  const firstKoreanIndex = normalized.search(/[\uac00-\ud7a3]/);
+  if (firstKoreanIndex <= 0) {
+    return normalized;
+  }
+
+  const head = normalized.slice(0, firstKoreanIndex).trimEnd();
+  const tail = normalized.slice(firstKoreanIndex).trimStart();
+  if (!head || !tail) {
+    return normalized;
+  }
+
+  return `${head}\n${tail}`;
 }
 
 function getSentenceForSpeech() {
@@ -102,10 +152,39 @@ function getSentenceForSpeech() {
   if (!sentence) return '';
 
   const currentWord = String(cards[currentIndex]?.word || '').trim();
-  if (!currentWord) return sentence;
+  let cleaned = sentence;
 
-  const replaced = sentence.replace(/_{3,}/g, currentWord);
-  return removeKoreanForSpeech(replaced);
+  if (currentWord) {
+    cleaned = cleaned.replace(/_{3,}/g, currentWord);
+  }
+
+  return removeKoreanForSpeech(cleaned);
+}
+
+function playSpeechText(text, lang, onEnded) {
+  const cleanText = String(text || '').trim();
+  if (!cleanText) {
+    if (typeof onEnded === 'function') onEnded();
+    return;
+  }
+
+  const audio = document.getElementById('audio');
+  if (!audio) {
+    if (typeof onEnded === 'function') onEnded();
+    return;
+  }
+
+  const url = `/tts_text?text=${encodeURIComponent(cleanText)}&lang=${encodeURIComponent(lang || 'english')}&t=${Date.now()}`;
+  audio.src = url;
+  audio.onended = () => {
+    if (typeof onEnded === 'function') onEnded();
+  };
+  audio.onerror = () => {
+    if (typeof onEnded === 'function') onEnded();
+  };
+  audio.play().catch(() => {
+    if (typeof onEnded === 'function') onEnded();
+  });
 }
 
 let currentIndex = 0;
@@ -120,13 +199,106 @@ function openFlashcardModal() {
 }
 
 function closeFlashcardModal() {
-  // 모달 닫기 (페이지 전체 리로드 대신 숨기기 및 오디오 정리)
+  stopAutoPlay();
   const modal = document.getElementById("flashcardModal");
   if (modal) modal.classList.add("hidden");
   const audio = document.getElementById('audio');
   if (audio) { audio.pause(); audio.currentTime = 0; }
-  // Navigate back to text list immediately
   window.location.href = '/';
+}
+
+function finishAutoPlay() {
+  stopAutoPlay();
+  alert('모든 단어를 다 읽었습니다.');
+  closeFlashcardModal();
+}
+
+function playCurrentCardAutoSequence() {
+  if (!autoPlayRunning || currentIndex >= cards.length) {
+    finishAutoPlay();
+    return;
+  }
+
+  const card = cards[currentIndex];
+  if (!card) {
+    finishAutoPlay();
+    return;
+  }
+
+  const progressText = `${currentIndex + 1} / ${cards.length}`;
+  const progress = document.getElementById('progressCount');
+  if (progress) progress.textContent = progressText;
+
+  const wordText = String(card.word || '').trim();
+  const sentenceText = String(card.sentence || '').trim();
+  const sentenceForSpeech = getSentenceForSpeech();
+
+  const afterWord = () => {
+    const front = document.getElementById("front");
+    const back = document.getElementById("back");
+    const flashcard = document.getElementById("flashcard");
+
+    front.classList.add("hidden");
+    back.classList.remove("hidden");
+    flashcard.classList.remove("from-indigo-500", "to-purple-500");
+    flashcard.classList.add("from-[#5C6BF6]", "to-[#7D84FF]");
+    isFront = false;
+
+    if (!sentenceForSpeech) {
+      currentIndex += 1;
+      if (currentIndex >= cards.length) {
+        finishAutoPlay();
+        return;
+      }
+      autoPlayTimer = setTimeout(() => {
+        showCard();
+        autoPlayTimer = setTimeout(playCurrentCardAutoSequence, 200);
+      }, 200);
+      return;
+    }
+
+    playSpeechText(sentenceForSpeech, card.language || 'english', () => {
+      currentIndex += 1;
+      if (currentIndex >= cards.length) {
+        finishAutoPlay();
+        return;
+      }
+      autoPlayTimer = setTimeout(() => {
+        showCard();
+        autoPlayTimer = setTimeout(playCurrentCardAutoSequence, 200);
+      }, 200);
+    });
+  };
+
+  if (wordText) {
+    playSpeechText(wordText, card.language || 'english', afterWord);
+  } else {
+    afterWord();
+  }
+}
+
+function startAutoPlay() {
+  if (!cards || cards.length === 0) {
+    alert('읽을 단어가 없습니다.');
+    return;
+  }
+
+  const btn = document.querySelector('button[onclick="startAutoPlay()"]');
+  if (btn) {
+    btn.textContent = '중지';
+    btn.classList.remove('bg-emerald-500', 'hover:bg-emerald-600');
+    btn.classList.add('bg-red-500', 'hover:bg-red-600');
+  }
+
+  autoPlayRunning = true;
+  if (autoPlayTimer) {
+    clearTimeout(autoPlayTimer);
+    autoPlayTimer = null;
+  }
+
+  if (currentIndex >= cards.length) currentIndex = 0;
+  showCard();
+  autoPlayTimer = setTimeout(playCurrentCardAutoSequence, 120);
 }
 
 function flipCard() {
@@ -153,7 +325,10 @@ function showCard() {
   document.getElementById("wordBack").innerText = card.word;
   document.getElementById("meaning").innerText = card.meaning;
   const sentenceText = (card.sentence || '').trim();
-  document.getElementById("sentence").innerText = sentenceText ? `[${sentenceText}]` : '';
+  const sentenceDisplay = sentenceText ? `[${formatSentenceForDisplay(sentenceText)}]` : '';
+  const sentenceEl = document.getElementById("sentence");
+  sentenceEl.innerText = sentenceDisplay;
+  sentenceEl.classList.add('whitespace-pre-line');
   const sentenceBtn = document.getElementById('sentenceSoundBtn');
   if (sentenceBtn) {
     sentenceBtn.disabled = !sentenceText;

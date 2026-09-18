@@ -40,7 +40,7 @@
     style="background-color: {% if text.test_count >= 5 %}#f3e8ff{% else %}#ffffff{% endif %};">
     
     <div>
-      <p class="font-medium text-gray-800">{{ text.title }}</p>
+      <p id="text-title-{{ text.id }}" class="font-medium text-gray-800">{{ text.title }}</p>
       <p class="text-sm text-gray-500">
         저장된 단어: <span id="word-count-{{ text.id }}">{{ text.word_count }}</span>개 · 
         <span class="text-sm">아는 단어:</span>
@@ -52,9 +52,10 @@
 
     <div class="flex items-center space-x-2">
       <button class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded"
-        onclick="openTextModal('{{ text.id }}', '{{ text.title }}', `{{ text.content|e }}`, '{{ text.source|e }}')">읽기</button>
+        onclick="openTextModalFromCard('{{ text.id }}')">읽기</button>
       <a href="/flashcards/{{ text.id }}" class="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1 rounded">암기카드</a>
       <a href="/test/{{ text.id }}" class="bg-purple-500 hover:bg-purple-600 text-white px-3 py-1 rounded">TEST</a>
+      <button onclick="editTextTitle('{{ text.id }}')" class="bg-amber-100 hover:bg-amber-200 text-amber-700 rounded px-2 py-1" title="제목 수정" aria-label="제목 수정">✏️</button>
       <button onclick="deleteText('{{ text.id }}')" class="bg-red-100 hover:bg-red-200 text-red-600 rounded px-2 py-1">🗑</button>
     </div>
   </div>
@@ -233,8 +234,8 @@
   <div class="bg-white rounded-2xl shadow-2xl w-[90%] max-w-4xl p-10 max-h-[80vh] overflow-y-auto border border-gray-200 relative">
     <button onclick="closeTextModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-3xl leading-none" aria-label="닫기">×</button>
     
-    <h3 id="modalTitle" class="text-center text-2xl font-medium text-gray-800 tracking-tight font-['Noto_Serif']"></h3>
-    <div id="modalSource" class="text-center text-sm text-gray-500 mb-8"></div>
+    <div id="modalSource" class="text-center text-sm text-gray-500 mb-2"></div>
+    <h3 id="modalTitle" class="text-center text-2xl font-medium text-gray-800 tracking-tight font-['Noto_Serif'] mb-8"></h3>
 
     <!-- ✅ 인쇄/수정 버튼 -->
     <div class="flex justify-end mb-3 space-x-3">
@@ -1046,6 +1047,73 @@ async function openTextModal(id, title, content, source = '') {
 
 function closeTextModal() {
   document.getElementById('textModal').classList.add('hidden');
+}
+
+function openTextModalFromCard(textId) {
+  const card = document.getElementById(`text-card-${textId}`);
+  if (!card) return;
+
+  const title = card.dataset.title || '';
+  const content = card.dataset.content || '';
+  const source = card.dataset.source || '';
+  openTextModal(textId, title, content, source);
+}
+
+async function editTextTitle(textId) {
+  const card = document.getElementById(`text-card-${textId}`);
+  if (!card) return;
+
+  const currentTitle = (card.dataset.title || '').trim();
+  const currentSource = (card.dataset.source || '').trim();
+
+  const nextTitleRaw = prompt('새 본문 제목을 입력하세요.', currentTitle);
+  if (nextTitleRaw === null) return;
+
+  const nextTitle = nextTitleRaw.trim();
+
+  if (!nextTitle) {
+    alert('제목을 입력해주세요.');
+    return;
+  }
+
+  const nextSourceRaw = prompt('새 출처를 입력하세요.', currentSource);
+  if (nextSourceRaw === null) return;
+
+  const nextSource = nextSourceRaw.trim();
+
+  if (nextTitle === currentTitle && nextSource === currentSource) return;
+
+  const content = card.dataset.content || '';
+
+  const res = await fetch('/update_text', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: textId, title: nextTitle, content, source: nextSource })
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    alert(data.error || '수정 실패');
+    return;
+  }
+
+  card.dataset.title = nextTitle;
+  card.dataset.source = nextSource;
+
+  const titleEl = document.getElementById(`text-title-${textId}`);
+  if (titleEl) titleEl.innerText = nextTitle;
+
+  const modalTitle = document.getElementById('modalTitle');
+  if (modalTitle && modalTitle.dataset.id === String(textId)) {
+    modalTitle.innerText = nextTitle;
+  }
+
+  const modalSource = document.getElementById('modalSource');
+  if (modalSource && modalSource.dataset.id === String(textId)) {
+    modalSource.innerText = nextSource ? `출처: ${nextSource}` : '출처: 없음';
+  }
+
+  alert(data.message || '제목/출처 수정 완료');
 }
 
 function printTextModal() {

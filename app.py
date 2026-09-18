@@ -123,6 +123,93 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
 }
 db = SQLAlchemy(app)
 
+ACCESS_LOG_TABLE_READY = False
+
+
+def ensure_access_log_table() -> None:
+    """Create access log table on ms1901 DB if it does not exist."""
+    global ACCESS_LOG_TABLE_READY
+    if ACCESS_LOG_TABLE_READY:
+        return
+
+    try:
+        db.session.execute(text("""
+            IF OBJECT_ID('dbo.log_records', 'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.log_records (
+                    log_id NVARCHAR(64) NOT NULL PRIMARY KEY,
+                    user_name NVARCHAR(255),
+                    page_name NVARCHAR(500) NOT NULL,
+                    access_time DATETIMEOFFSET NOT NULL
+                        CONSTRAINT DF_log_records_access_time
+                        DEFAULT DATEADD(hour, 9, SYSUTCDATETIME())
+                );
+            END
+            ELSE
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS 
+                    WHERE TABLE_NAME = 'log_records' AND COLUMN_NAME = 'user_name'
+                )
+                BEGIN
+                    ALTER TABLE dbo.log_records ADD user_name NVARCHAR(255)
+                END
+            END
+        """))
+        db.session.commit()
+        ACCESS_LOG_TABLE_READY = True
+    except Exception:
+        db.session.rollback()
+
+
+def _write_access_log() -> None:
+    # 페이지 접속 기록만 남기고 API/정적 파일은 제외한다.
+    path = (request.path or '').strip()
+    if not path:
+        return
+    if path.startswith('/static') or path.startswith('/api/'):
+        return
+    if path in {'/favicon.ico'}:
+        return
+
+    ensure_access_log_table()
+    if not ACCESS_LOG_TABLE_READY:
+        return
+
+    page_name = request.full_path if request.query_string else path
+    if page_name.endswith('?'):
+        page_name = page_name[:-1]
+
+    # 사용자명 가져오기
+    user_name = str(request.environ.get('REMOTE_USER') or '').strip()
+    if not user_name:
+        user_name = str(request.environ.get('LOGON_USER') or '').strip()
+    if not user_name:
+        user_name = os.getenv('USERNAME', 'unknown').strip()
+
+    log_id_literal = _sql_literal(str(uuid.uuid4()))
+    user_literal = _sql_literal(user_name)
+    page_literal = _sql_literal(page_name)
+
+    try:
+        db.session.execute(text(f"""
+            INSERT INTO dbo.log_records (log_id, user_name, page_name, access_time)
+            VALUES ({log_id_literal}, {user_literal}, {page_literal}, DATEADD(hour, 9, SYSUTCDATETIME()))
+        """))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
+@app.after_request
+def capture_access_log(response):
+    try:
+        _write_access_log()
+    except Exception:
+        # 로그 실패로 사용자 요청은 막지 않는다.
+        pass
+    return response
+
 # ✅ 사용자 목록 (간단한 구현)
 USERS = [
     {"id": "user1", "name": "박영진", "user_id": "박영진", "is_admin": True},
@@ -1918,12 +2005,23 @@ def tts_text_post():
 @app.route('/update_text', methods=['POST'])
 def update_text():
     data = request.get_json()
+    title = data.get('title')
+    content = data.get('content')
+    source = data.get('source')
+
     query = text("""
         UPDATE text_records_rows
-        SET title = :title, content = :content
+        SET title = :title,
+            content = :content,
+            source = :source
         WHERE id = :id
     """)
-    db.session.execute(query, data)
+    db.session.execute(query, {
+        "id": data.get('id'),
+        "title": title,
+        "content": content,
+        "source": source
+    })
     db.session.commit()
     return jsonify({"message": "텍스트 수정 완료"})
 
@@ -2343,7 +2441,14 @@ def get_words_by_text(text_id):
         SELECT id, word, meaning, ISNULL(is_learned, 0) AS is_learned, sentence AS example, exam_korean
         FROM words_rows
         WHERE text_id = :text_id
-        ORDER BY word ASC
+        ORDER BY
+            CASE WHEN TRY_CONVERT(DATETIME2, added_at) IS NULL THEN 1 ELSE 0 END,
+            TRY_CONVERT(DATETIME2, added_at) ASC,
+            CASE WHEN TRY_CONVERT(DATETIME2, created_at) IS NULL THEN 1 ELSE 0 END,
+            TRY_CONVERT(DATETIME2, created_at) ASC,
+            CASE WHEN TRY_CONVERT(INT, id) IS NULL THEN 1 ELSE 0 END,
+            TRY_CONVERT(INT, id) ASC,
+            id ASC
     """)
     result = db.session.execute(query, {"text_id": text_id}).fetchall()
     return jsonify([{
@@ -3253,6 +3358,7 @@ def debug_test_records():
         "is_admin": session.get('is_admin'),
         "recent_records": result
     })
+
 
 # ✅ 스펠링 테스트 페이지
 @app.route('/spelling_test')
